@@ -1,6 +1,6 @@
 import numpy as np
 import random
-from scipy.optimize import minimize
+from scipy.optimize import minimize, Bounds
 from utilities import *
 from functools import lru_cache
 
@@ -23,14 +23,23 @@ class Manipulator7DOF:
         return positions
 
     @lru_cache(maxsize=32)
-    def inverse_kinematics(self, target_position):
-        """ Calculate joint angles to reach a target position using inverse kinematics. """
-        initial_joint_angles = np.array(self.joint_angles)
-        result = minimize(self.objective_function_for_ik, initial_joint_angles, args=(target_position,), method='Nelder-Mead')
-        if result.success:
-            return result.x
+    def inverse_kinematics_multiple_solutions(self, target_position, num_trials=10):
+        """ Generate multiple solutions for inverse kinematics and select the best one. """
+        solutions = []
+        for _ in range(num_trials):
+            initial_joint_angles = np.array([random.uniform(-np.pi, np.pi) for _ in range(7)])
+            bounds = Bounds([-np.pi] * 7, [np.pi] * 7)
+            result = minimize(self.objective_function_for_ik, initial_joint_angles, args=(target_position,),
+                              method='SLSQP', bounds=bounds, options={'maxiter': 100, 'disp': False})
+            if result.success:
+                solutions.append(result.x)
+
+        # Evaluate all successful solutions and select the best one
+        if solutions:
+            best_solution = self.evaluate_solutions(solutions)
+            return best_solution
         else:
-            raise ValueError("Inverse kinematics solution not found.")
+            raise ValueError("No valid inverse kinematics solution found.")
 
     def objective_function_for_ik(self, joint_angles, target_position):
         """ Objective function for the minimization in inverse kinematics. """
@@ -77,6 +86,17 @@ class Manipulator7DOF:
         total_mass = sum(self.link_masses)
         center_of_mass = np.dot(self.link_masses, positions) / total_mass
         return center_of_mass
+
+    def evaluate_solutions(self, solutions):
+        """ Evaluate multiple IK solutions and select the best based on a criterion. """
+        min_energy = float('inf')
+        best_solution = None
+        for solution in solutions:
+            energy = self.energy_consumption(solution)
+            if energy < min_energy:
+                min_energy = energy
+                best_solution = solution
+        return best_solution
 
     def evaluate_load_distribution(self):
         """ Evaluate the distribution of load across the joints. """
