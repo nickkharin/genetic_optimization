@@ -5,11 +5,13 @@ from utilities import *
 from functools import lru_cache
 
 class Manipulator7DOF:
-    def __init__(self, joint_angles=None, lengths=None, link_masses=None, inertia_tensors=None):
+    def __init__(self, joint_angles=None, lengths=None, link_masses=None, inertia_tensors=None, joint_frictions=None, environment_temp=20):
         self.joint_angles = joint_angles if joint_angles is not None else [random.uniform(-np.pi, np.pi) for _ in range(7)]
         self.lengths = lengths if lengths is not None else [random.uniform(0.5, 2.0) for _ in range(7)]
         self.link_masses = link_masses if link_masses is not None else [random.uniform(1.0, 5.0) for _ in range(7)]
         self.inertia_tensors = inertia_tensors if inertia_tensors is not None else [np.eye(3) * random.uniform(0.1, 1.0) for _ in range(7)]
+        self.joint_frictions = joint_frictions if joint_frictions is not None else [random.uniform(0.01, 0.05) for _ in range(7)]
+        self.environment_temp = environment_temp  # ambient temperature in degrees Celsius
 
     def forward_kinematics(self):
         """ Calculate the position of each joint using forward kinematics. """
@@ -42,10 +44,21 @@ class Manipulator7DOF:
             raise ValueError("No valid inverse kinematics solution found.")
 
     def objective_function_for_ik(self, joint_angles, target_position):
-        """ Objective function for the minimization in inverse kinematics. """
-        self.joint_angles = joint_angles
+        adjusted_angles = self.adjust_for_temperature(joint_angles)
+        self.joint_angles = adjusted_angles
         current_position = self.forward_kinematics()[-1]
         return np.linalg.norm(current_position - target_position)
+
+    def adjust_for_temperature(self, joint_angles):
+        # Coefficient for thermal expansion/contraction, simplified assumption
+        thermal_coefficient = 1e-5
+        temperature_effect = (self.environment_temp - 20) * thermal_coefficient
+        return joint_angles * (1 + temperature_effect)
+
+    def adjust_for_environment(self, joint_angles):
+        # Apply friction adjustments
+        friction_adjusted_angles = joint_angles - self.joint_frictions
+        return friction_adjusted_angles
 
     def calculate_dynamics(self, joint_velocities, joint_accelerations):
         """ Calculate forces and torques on each joint including inertial, Coriolis, and centrifugal effects. """

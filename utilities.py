@@ -8,3 +8,4 @@ def dh_transform(a, alpha, d, theta):
         [0, np.sin(alpha), np.cos(alpha), d],
         [0, 0, 0, 1]
     ])
+
