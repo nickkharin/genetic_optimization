@@ -2,25 +2,29 @@ import numpy as np
 import random
 from scipy.optimize import minimize
 from utilities import *
-
+from functools import lru_cache
 
 class Manipulator7DOF:
-    def __init__(self, joint_angles=None, lengths=None):
+    def __init__(self, joint_angles=None, lengths=None, link_masses=None, inertia_tensors=None):
         self.joint_angles = joint_angles if joint_angles is not None else [random.uniform(-np.pi, np.pi) for _ in range(7)]
         self.lengths = lengths if lengths is not None else [random.uniform(0.5, 2.0) for _ in range(7)]
+        self.link_masses = link_masses if link_masses is not None else [random.uniform(1.0, 5.0) for _ in range(7)]
+        self.inertia_tensors = inertia_tensors if inertia_tensors is not None else [np.eye(3) * random.uniform(0.1, 1.0) for _ in range(7)]
 
     def forward_kinematics(self):
-        T = np.eye(4)  # Инициализация единичной матрицы
-        positions = []  # Список для хранения положений звеньев
+        """ Calculate the position of each joint using forward kinematics. """
+        T = np.eye(4)  # Identity matrix initialization
+        positions = []
         for i in range(7):
-            # Применение преобразования Денавита-Хартенберга для каждого звена
             theta = self.joint_angles[i]
             a, alpha, d = self.lengths[i], 0, 0
             T = np.dot(T, dh_transform(a, alpha, d, theta))
-            positions.append(T[:3, 3])  # Добавление положения звена в список
+            positions.append(T[:3, 3])
         return positions
 
+    @lru_cache(maxsize=32)
     def inverse_kinematics(self, target_position):
+        """ Calculate joint angles to reach a target position using inverse kinematics. """
         initial_joint_angles = np.array(self.joint_angles)
         result = minimize(self.objective_function_for_ik, initial_joint_angles, args=(target_position,), method='Nelder-Mead')
         if result.success:
@@ -29,27 +33,54 @@ class Manipulator7DOF:
             raise ValueError("Inverse kinematics solution not found.")
 
     def objective_function_for_ik(self, joint_angles, target_position):
+        """ Objective function for the minimization in inverse kinematics. """
         self.joint_angles = joint_angles
         current_position = self.forward_kinematics()[-1]
         return np.linalg.norm(current_position - target_position)
 
-    def calculate_dynamics(self, joint_accelerations):
-        g = 9.81  # Ускорение свободного падения
-        forces = []  # Список для хранения сил, действующих на звенья
-        for i, acceleration in enumerate(joint_accelerations):
-            # Вычисление силы с учетом гравитации
-            force = self.link_masses[i] * (acceleration + g)
-            forces.append(force)
-        return forces
+    def calculate_dynamics(self, joint_velocities, joint_accelerations):
+        """ Calculate forces and torques on each joint including inertial, Coriolis, and centrifugal effects. """
+        # Calculate gravitational forces
+        g = 9.81  # Acceleration due to gravity
+        gravitational_forces = [self.link_masses[i] * g for i in range(7)]
+
+        # Calculate inertial forces
+        inertial_forces = [np.dot(self.inertia_tensors[i], joint_accelerations[i]) for i in range(7)]
+
+        # Calculate Coriolis and centrifugal forces
+        coriolis_and_centrifugal_forces = self.calculate_coriolis_and_centrifugal_forces(joint_velocities,
+                                                                                         joint_accelerations)
+
+        # Total forces and torques
+        total_forces = np.add(np.add(gravitational_forces, inertial_forces), coriolis_and_centrifugal_forces)
+        return total_forces
+
+    def calculate_coriolis_and_centrifugal_forces(self, joint_velocities, joint_accelerations):
+        """ Calculate Coriolis and centrifugal forces based on the robot's velocity and acceleration dynamics. """
+        # Placeholder for the Coriolis and centrifugal force calculation (requires Jacobian matrices)
+        # This is a simplified placeholder, and you would need to calculate this properly using the robot's dynamics
+        J = self.calculate_jacobian()
+        # For simplicity, assuming J_dot * q_dot is zero
+        coriolis_and_centrifugal = np.dot(J.T, joint_velocities) * joint_accelerations
+        return coriolis_and_centrifugal
+
+    def calculate_jacobian(self):
+        """ Calculate the Jacobian matrix for the manipulator. """
+        # This is a simplified placeholder calculation for the Jacobian
+        # A proper implementation should calculate the partial derivatives of the end-effector's position with respect to each joint variable
+        J = np.zeros((6, 7))  # Assuming a 6x7 Jacobian for a 7 DOF manipulator
+        return J
 
     def calculate_center_of_mass(self):
+        """ Calculate the center of mass of the manipulator. """
         positions = self.forward_kinematics()
-        total_mass = len(self.lengths)  # Простое предположение: масса каждого звена = 1
-        center_of_mass = sum(positions) / total_mass  # Среднее положение всех звеньев
+        total_mass = sum(self.link_masses)
+        center_of_mass = np.dot(self.link_masses, positions) / total_mass
         return center_of_mass
 
     def evaluate_load_distribution(self):
-        load_variability = np.std(self.joint_angles)  # Стандартное отклонение углов суставов как мера неравномерности
+        """ Evaluate the distribution of load across the joints. """
+        load_variability = np.std(self.joint_angles)
         return 1 / (1 + load_variability)
 
     def evaluate_dynamic_stability(self, joint_velocities=None, joint_accelerations=None):
@@ -60,9 +91,7 @@ class Manipulator7DOF:
 
         velocity_variability = np.std(joint_velocities)
         acceleration_variability = np.std(joint_accelerations)
-
-        stability_score = 1 / (1 + velocity_variability + acceleration_variability)
-        return stability_score
+        return 1 / (1 + velocity_variability + acceleration_variability)
 
     def evaluate_stability(self, joint_velocities=np.zeros(7), joint_accelerations=np.zeros(7)):
         com_score = np.linalg.norm(self.calculate_center_of_mass())
