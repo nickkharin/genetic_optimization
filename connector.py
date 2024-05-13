@@ -1,3 +1,5 @@
+# connector.py
+
 import zmq
 
 
@@ -13,8 +15,17 @@ class CoppeliaSimConnector:
         self.socket.send_string(message)
         return self.socket.recv_string()
 
+    def test_connection(self):
+        """Проверяет соединение, запрашивая версию CoppeliaSim."""
+        try:
+            response = self.send_request('getVersion')
+            print(f"Connected to CoppeliaSim, version {response}")
+            return True
+        except Exception as e:
+            print(f"Failed to connect: {e}")
+            return False
+
     def close(self):
         """Закрывает соединение с CoppeliaSim."""
         self.socket.close()
         self.context.term()
-

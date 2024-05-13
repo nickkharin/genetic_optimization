@@ -15,7 +15,7 @@ if __name__ == '__main__':
         mutation_rate, pop_size = decode_action(action)  # Декодирование действия
 
         population = generate_initial_population(pop_size)
-        target = [7, 3, 2]
+        target = [2, 2, 0.2]
         fitness_scores = [multi_criteria_fitness(robot, target) for robot in population]
 
         for _ in range(len(population)):
