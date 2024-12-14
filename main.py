@@ -22,7 +22,7 @@ if __name__ == '__main__':
 
     # Генерация начальной популяции
     population = generate_initial_population(pop_size=50, num_links=num_links)
-    target = [2, 2, 0.2]
+    target = [2, 2, 0.2]  # Трехмерная цель (X, Y, Z)
 
     for generation in range(num_generations):
         action = optimizer.choose_action(current_state)
@@ -37,9 +37,32 @@ if __name__ == '__main__':
 
         while len(new_population) < len(population):
             parent1, parent2 = random.sample(parents, 2)
-            child = crossover(parent1, parent2)
-            child = mutate(child, mutation_rate)
-            new_population.append(child)
+
+            # Проверяем корректность входных данных
+            if not isinstance(parent1, Manipulator7DOF) or not isinstance(parent2, Manipulator7DOF):
+                raise TypeError("Родители должны быть экземплярами Manipulator7DOF.")
+
+            # Кроссовер
+            try:
+                child1, child2 = crossover(parent1, parent2)
+            except ValueError as e:
+                logging.error(f"Ошибка при выполнении crossover: {e}")
+                continue
+
+            # Проверка результата кроссовера
+            if not (isinstance(child1, Manipulator7DOF) and isinstance(child2, Manipulator7DOF)):
+                raise TypeError("Ошибка: crossover вернул объекты, не являющиеся Manipulator7DOF.")
+
+            # Мутация потомков
+            child1 = mutate(child1, mutation_rate)
+            child2 = mutate(child2, mutation_rate)
+
+            # Проверка результата мутации
+            if not (isinstance(child1, Manipulator7DOF) and isinstance(child2, Manipulator7DOF)):
+                raise TypeError("Ошибка: mutate вернул объект, не являющийся Manipulator7DOF.")
+
+            # Добавляем потомков в новую популяцию
+            new_population.extend([child1, child2])
 
         population = new_population
 
@@ -69,8 +92,21 @@ if __name__ == '__main__':
     # Создание среды с фиксированными длинами звеньев
     env = ManipulatorEnv(link_lengths=optimal_lengths)
 
+    # Проверка цели в 3D и настройка среды
+    logging.info(f"Цель установлена в координатах (X: {target[0]}, Y: {target[1]}, Z: {target[2]})")
+
     # Обучение RL-агента
-    model = PPO("MlpPolicy", env, verbose=1)
+    model = PPO(
+        "MlpPolicy",
+        env,
+        verbose=1,
+        learning_rate=3e-4,
+        n_steps=4096,
+        batch_size=128,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_range=0.2
+    )
     model.learn(total_timesteps=100000)
 
     # Сохранение обученной модели

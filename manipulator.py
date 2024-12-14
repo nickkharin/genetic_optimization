@@ -10,12 +10,14 @@ class Manipulator7DOF:
     Класс, представляющий 7-степенный манипулятор.
     """
 
-    def __init__(self, joint_angles=None, lengths=None, link_masses=None, inertia_tensors=None, joint_frictions=None, environment_temp=20):
+    def __init__(self, joint_angles=None, lengths=None, link_masses=None, inertia_tensors=None, joint_frictions=None, alphas=None, ds=None, environment_temp=20):
         """
-        Инициализация манипулятора с возможностью задания длин звеньев и углов суставов.
+        Инициализация манипулятора с возможностью задания параметров DH.
         """
         self.lengths = lengths if lengths is not None else [random.uniform(0.5, 2.0) for _ in range(7)]
         self.joint_angles = joint_angles if joint_angles is not None else [random.uniform(-np.pi, np.pi) for _ in range(len(self.lengths))]
+        self.alphas = alphas if alphas is not None else [random.uniform(-np.pi / 2, np.pi / 2) for _ in range(7)]  # Увеличен диапазон
+        self.ds = ds if ds is not None else [random.uniform(0.1, 1.0) for _ in range(7)]  # Увеличен диапазон
         self.link_masses = link_masses if link_masses is not None else [random.uniform(1.0, 5.0) for _ in range(7)]
         self.inertia_tensors = inertia_tensors if inertia_tensors is not None else [np.eye(3) * random.uniform(0.1, 1.0) for _ in range(7)]
         self.joint_frictions = joint_frictions if joint_frictions is not None else [random.uniform(0.01, 0.05) for _ in range(7)]
@@ -36,10 +38,11 @@ class Manipulator7DOF:
         for i in range(7):
             theta = self.joint_angles[i]
             a = self.lengths[i]
-            alpha = 0
-            d = 0
+            alpha = self.alphas[i]
+            d = self.ds[i]
             T = np.dot(T, dh_transform(a, alpha, d, theta))
-            positions.append(T[:3, 3])  # Берём только XYZ-координаты
+            # Берём XYZ-координаты
+            positions.append((T[0, 3], T[1, 3], T[2, 3]))
         return positions
 
     @lru_cache(maxsize=32)
@@ -65,7 +68,7 @@ class Manipulator7DOF:
                 logging.warning("Optimization failed during IK computation.")
 
         if solutions:
-            return self.evaluate_solutions(solutions)
+            return self.evaluate_solutions(solutions, target_position)
         else:
             raise ValueError("No valid inverse kinematics solution found.")
 
@@ -75,7 +78,7 @@ class Manipulator7DOF:
         """
         self.joint_angles = joint_angles
         current_position = self.forward_kinematics()[-1]  # Положение конца манипулятора
-        return np.linalg.norm(current_position - target_position)  # Евклидово расстояние до цели
+        return np.linalg.norm(np.array(current_position) - np.array(target_position))  # Евклидово расстояние до цели
 
     def calculate_center_of_mass(self):
         """
@@ -102,12 +105,18 @@ class Manipulator7DOF:
         joint_variability = np.std(self.joint_angles)  # Вариативность углов суставов
         return 1 / (1 + com_score + joint_variability)  # Итоговая стабильность
 
-    def evaluate_solutions(self, solutions):
+    def evaluate_solutions(self, solutions, target_position):
         """
         Выбирает наилучшее решение из предложенных.
         """
-        best_solution = min(solutions, key=lambda x: self.objective_function_for_ik(x, self.forward_kinematics()[-1]))
+        best_solution = min(solutions, key=lambda x: self.objective_function_for_ik(x, target_position))
         return best_solution
+
+    def reset(self):
+        """
+        Сбрасывает углы суставов манипулятора к начальному состоянию.
+        """
+        self.joint_angles = np.zeros(7)
 
     def __str__(self):
         """
