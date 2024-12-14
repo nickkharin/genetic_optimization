@@ -4,6 +4,7 @@ from reinforcement_learning import ManipulatorEnv
 from stable_baselines3 import PPO
 import logging
 import numpy as np
+import json
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
@@ -85,6 +86,14 @@ if __name__ == '__main__':
     best_robot = population[best_index]
     optimal_lengths = best_robot.lengths
     logging.info(f"Лучшие длины звеньев: {optimal_lengths}, Fitness: {fitness_scores[best_index]}")
+
+    # Запись длин звеньев в файл JSON
+    try:
+        with open("optimal_lengths.json", "w") as f:
+            json.dump(optimal_lengths, f)
+        logging.info("Лучшие длины звеньев успешно сохранены в 'optimal_lengths.json'.")
+    except Exception as e:
+        logging.error(f"Ошибка при сохранении длин звеньев: {e}")
 
     # --- Этап 2: Управление углами суставов ---
     logging.info("Этап 2: Обучение управления углами суставов с фиксированными длинами звеньев.")

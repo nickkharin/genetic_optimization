@@ -1,4 +1,5 @@
 import logging
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # Для 3D графиков
@@ -8,9 +9,14 @@ from stable_baselines3 import PPO
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
-    # Заданные длины звеньев из этапа оптимизации
-    optimal_lengths = [1.6427186647565832, 1.953847200857151, 1.547593575488852,
-                       0.5253090580566936, 1.5216762501198067, 1.2436702018203596, 2.0326332247350996]
+    # Загрузка оптимальных длин звеньев из файла JSON
+    try:
+        with open("optimal_lengths.json", "r") as f:
+            optimal_lengths = json.load(f)
+        logging.info(f"Оптимальные длины звеньев успешно загружены: {optimal_lengths}")
+    except FileNotFoundError:
+        logging.error("Файл optimal_lengths.json не найден. Проверьте выполнение первого этапа.")
+        raise
 
     # Задать тестовую цель для проверки (с учетом координаты z)
     target = np.array([2, 2, 0.2])
