@@ -41,37 +41,24 @@ class GeneticAlgorithmOptimizer:
         self.num_states = num_states  # Количество состояний
 
     def choose_action(self, state):
-        """
-        Выбирает действие для текущего состояния.
-
-        Args:
-            state (int): Текущее состояние.
-
-        Returns:
-            int: Выбранное действие.
-        """
         if random.uniform(0, 1) < self.epsilon:
-            action = random.choice(self.actions)  # Исследование действий
+            action = random.choice(self.actions)  # Исследование пространства действий
+            logging.info(f"Exploration: Random action chosen: {action}")
         else:
-            action = int(np.argmax(self.q_table[state]))  # Выбор наилучшего действия
-        logging.info(f"State: {state}, Chosen action: {action}, Epsilon: {self.epsilon}")
+            action = np.argmax(self.q_table[state])  # Использование знаний
+            logging.info(f"Exploitation: Best action chosen: {action}")
+        logging.info(f"State: {state}, Action: {action}, Q-values: {self.q_table[state]}")
         return action
 
     def update_q_table(self, state, action, reward, next_state):
-        """
-        Обновляет Q-таблицу на основе опыта.
-
-        Args:
-            state (int): Текущее состояние.
-            action (int): Выполненное действие.
-            reward (float): Полученная награда.
-            next_state (int): Следующее состояние.
-        """
         old_value = self.q_table[state, action]
         next_max = np.max(self.q_table[next_state])
         new_value = (1 - self.alpha) * old_value + self.alpha * (reward + self.gamma * next_max)
-        self.q_table[state, action] = np.clip(new_value, -1e3, 1e3)  # Ограничение значений
-        logging.debug(f"Updated Q-table at state {state}, action {action}: {self.q_table[state, action]}")
+        self.q_table[state, action] = np.clip(new_value, -1e3, 1e3)  # Ограничение значений Q
+
+        # Логирование изменений
+        logging.info(f"Updated Q-table: State {state}, Action {action}, Old Value {old_value}, "
+                     f"Reward {reward}, Next Max {next_max}, New Value {new_value}")
 
     def get_next_state(self, current_state, reward):
         """

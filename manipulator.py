@@ -10,19 +10,17 @@ class Manipulator7DOF:
     Класс, представляющий 7-степенный манипулятор.
     """
 
-    def __init__(self, joint_angles=None, lengths=None, link_masses=None, inertia_tensors=None, joint_frictions=None,
-                 alphas=None, ds=None, environment_temp=20):
+    def __init__(self, joint_angles=None, lengths=None, link_masses=None, inertia_tensors=None, joint_frictions=None, alphas=None, ds=None, environment_temp=20):
         """
         Инициализация манипулятора с возможностью задания параметров DH.
         """
-        self.lengths = lengths if lengths is not None else [1.0 for _ in
-                                                            range(7)]  # Все длины одинаковые (например, 1.0 м)
-        self.joint_angles = joint_angles if joint_angles is not None else np.zeros(7)  # Начальные углы в нулях
-        self.alphas = alphas if alphas is not None else [0 for _ in range(7)]  # Угол альфа по умолчанию 0
-        self.ds = ds if ds is not None else [0 for _ in range(7)]  # Все d равны 0
-        self.link_masses = link_masses if link_masses is not None else [1.0 for _ in range(7)]
-        self.inertia_tensors = inertia_tensors if inertia_tensors is not None else [np.eye(3) * 0.1 for _ in range(7)]
-        self.joint_frictions = joint_frictions if joint_frictions is not None else [0.01 for _ in range(7)]
+        self.lengths = lengths if lengths is not None else [random.uniform(0.5, 2.0) for _ in range(7)]
+        self.joint_angles = joint_angles if joint_angles is not None else [random.uniform(-np.pi, np.pi) for _ in range(len(self.lengths))]
+        self.alphas = alphas if alphas is not None else [random.uniform(-np.pi / 2, np.pi / 2) for _ in range(7)]  # Увеличен диапазон
+        self.ds = ds if ds is not None else [random.uniform(0.1, 1.0) for _ in range(7)]  # Увеличен диапазон
+        self.link_masses = link_masses if link_masses is not None else [random.uniform(1.0, 5.0) for _ in range(7)]
+        self.inertia_tensors = inertia_tensors if inertia_tensors is not None else [np.eye(3) * random.uniform(0.1, 1.0) for _ in range(7)]
+        self.joint_frictions = joint_frictions if joint_frictions is not None else [random.uniform(0.01, 0.05) for _ in range(7)]
         self.environment_temp = environment_temp  # Температура окружающей среды
 
     def max_reach(self):
@@ -113,13 +111,6 @@ class Manipulator7DOF:
         """
         best_solution = min(solutions, key=lambda x: self.objective_function_for_ik(x, target_position))
         return best_solution
-
-    def reset(self):
-        """
-        Сбрасывает углы суставов манипулятора к начальному состоянию.
-        """
-        self.joint_angles = np.zeros(7)  # Углы суставов обнуляются
-        logging.info("Manipulator reset to default state: all joint angles set to zero.")
 
     def __str__(self):
         """

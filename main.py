@@ -43,26 +43,20 @@ if __name__ == '__main__':
                 raise TypeError("Родители должны быть экземплярами Manipulator7DOF.")
 
             # Кроссовер
-            try:
-                child1, child2 = crossover(parent1, parent2)
-            except ValueError as e:
-                logging.error(f"Ошибка при выполнении crossover: {e}")
-                continue
+            child = crossover(parent1, parent2)
 
-            # Проверка результата кроссовера
-            if not (isinstance(child1, Manipulator7DOF) and isinstance(child2, Manipulator7DOF)):
-                raise TypeError("Ошибка: crossover вернул объекты, не являющиеся Manipulator7DOF.")
+            # Проверяем, что кроссовер возвращает корректный объект
+            if not isinstance(child, Manipulator7DOF):
+                raise TypeError("Ошибка: crossover вернул объект, не являющийся Manipulator7DOF.")
 
-            # Мутация потомков
-            child1 = mutate(child1, mutation_rate)
-            child2 = mutate(child2, mutation_rate)
+            # Мутация
+            child = mutate(child, mutation_rate)
 
-            # Проверка результата мутации
-            if not (isinstance(child1, Manipulator7DOF) and isinstance(child2, Manipulator7DOF)):
+            # Проверка после мутации
+            if not isinstance(child, Manipulator7DOF):
                 raise TypeError("Ошибка: mutate вернул объект, не являющийся Manipulator7DOF.")
 
-            # Добавляем потомков в новую популяцию
-            new_population.extend([child1, child2])
+            new_population.append(child)
 
         population = new_population
 
@@ -96,19 +90,7 @@ if __name__ == '__main__':
     logging.info(f"Цель установлена в координатах (X: {target[0]}, Y: {target[1]}, Z: {target[2]})")
 
     # Обучение RL-агента
-    policy_kwargs = dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])])
-    model = PPO(
-        "MlpPolicy",
-        env,
-        verbose=1,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        policy_kwargs=policy_kwargs
-    )
+    model = PPO("MlpPolicy", env, verbose=1)
     model.learn(total_timesteps=100000)
 
     # Сохранение обученной модели
