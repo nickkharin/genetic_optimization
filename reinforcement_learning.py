@@ -4,6 +4,7 @@ import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from manipulator import Manipulator7DOF
+import matplotlib.pyplot as plt
 
 
 class ManipulatorEnv(gym.Env):
@@ -78,11 +79,21 @@ class ManipulatorEnv(gym.Env):
 
     def calculate_reward(self):
         """
-        Вычисляет награду на основе расстояния до цели.
+        Вычисляет награду на основе расстояния до цели, стабильности и энергопотребления.
         """
         distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
         stability = self.robot.evaluate_stability()
-        return -distance + stability
+        energy = self.robot.energy_consumption()
+
+        # Нормализуем значения
+        max_distance = self.max_reach()
+        normalized_distance = distance / max_distance
+        normalized_stability = stability  # Если стабильность уже от 0 до 1
+        normalized_energy = energy / 10.0  # Зависит от модели
+
+        # Взвешенная функция награды
+        reward = -normalized_distance + 0.5 * normalized_stability - 0.1 * normalized_energy
+        return reward
 
     def is_done(self):
         """
@@ -90,29 +101,3 @@ class ManipulatorEnv(gym.Env):
         """
         distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
         return distance < 0.05
-
-
-if __name__ == "__main__":
-    # Длины звеньев манипулятора
-    link_lengths = [1.0, 1.5, 1.0, 0.8, 0.6, 0.5, 0.3]
-
-    # Создать векторизованную среду для обучения
-    env = make_vec_env(ManipulatorEnv, n_envs=4, env_kwargs={"link_lengths": link_lengths})
-
-    # Создать модель PPO
-    model = PPO("MlpPolicy", env, verbose=1)
-
-    # Обучить модель
-    model.learn(total_timesteps=100000)
-
-    # Сохранить модель
-    model.save("ppo_manipulator")
-
-    # Тестирование модели
-    test_env = ManipulatorEnv(link_lengths=link_lengths, target_position=np.array([2.0, 2.0, 0.5]))
-    obs, _ = test_env.reset()  # Извлекаем только obs из (obs, info)
-    done = False
-    while not done:
-        action, _ = model.predict(obs)
-        obs, reward, done, truncated, info = test_env.step(action)  # Обрабатываем 5 значений
-        print(f"Reward: {reward}, Observation: {obs}, Target: {info['target']}")
