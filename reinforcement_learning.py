@@ -36,7 +36,7 @@ class ManipulatorEnv(gym.Env):
         super().reset(seed=seed)
         if self.target is None:
             max_reach = self.max_reach()
-            r = np.random.uniform(0, max_reach)
+            r = np.random.uniform(0, 0.8 * max_reach)  # Цель ограничена 80% от максимальной дальности
             theta = np.random.uniform(0, 2 * np.pi)
             phi = np.random.uniform(0, np.pi)
             self.target = np.array([
@@ -44,6 +44,9 @@ class ManipulatorEnv(gym.Env):
                 r * np.sin(phi) * np.sin(theta),
                 r * np.cos(phi)
             ])
+
+        # Устанавливаем манипулятор в начальное состояние
+        self.robot.joint_angles = np.zeros(7)  # Углы суставов по умолчанию
         self.robot.reset()
         return self.get_observation(), {}
 

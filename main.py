@@ -96,16 +96,18 @@ if __name__ == '__main__':
     logging.info(f"Цель установлена в координатах (X: {target[0]}, Y: {target[1]}, Z: {target[2]})")
 
     # Обучение RL-агента
+    policy_kwargs = dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])])
     model = PPO(
         "MlpPolicy",
         env,
         verbose=1,
         learning_rate=3e-4,
-        n_steps=4096,
-        batch_size=128,
+        n_steps=2048,
+        batch_size=64,
         gamma=0.99,
         gae_lambda=0.95,
-        clip_range=0.2
+        clip_range=0.2,
+        policy_kwargs=policy_kwargs
     )
     model.learn(total_timesteps=100000)
 
