@@ -11,16 +11,16 @@ class ManipulatorEnv(gym.Env):
     """
     Среда для обучения манипулятора с использованием RL.
     """
-    def __init__(self, link_lengths=[1, 1, 1, 1, 1, 1, 1], target_position=None):
+    def __init__(self, link_lengths=None, target_position=None):
         super(ManipulatorEnv, self).__init__()
-        self.link_lengths = link_lengths  # Длины звеньев манипулятора
-        self.robot = Manipulator7DOF(lengths=self.link_lengths)  # Передаём длины звеньев как lengths
-        self.target = target_position  # Если цель передана, используем её, иначе сгенерируем в reset()
+        self.link_lengths = link_lengths if link_lengths else [1] * 7
+        self.robot = Manipulator7DOF(lengths=self.link_lengths)
+        self.target = target_position
 
-        # Пространство действий: изменения углов суставов
+        # Пространство действий
         self.action_space = spaces.Box(low=-0.1, high=0.1, shape=(7,), dtype=np.float32)
 
-        # Пространство наблюдений: 7 углов суставов + расстояние до цели + стабильность + энергопотребление
+        # Пространство наблюдений
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(10,), dtype=np.float32)
 
     def max_reach(self):
@@ -34,39 +34,28 @@ class ManipulatorEnv(gym.Env):
         Сбрасывает состояние среды и генерирует цель в пределах досягаемости манипулятора.
         """
         super().reset(seed=seed)
-        max_reach = self.max_reach()
-
-        if self.target is None:  # Если цель не задана, генерируем случайную
-            r = np.random.uniform(0, max_reach)  # Радиус (не больше max_reach)
-            theta = np.random.uniform(0, 2 * np.pi)  # Угол в горизонтальной плоскости
-            phi = np.random.uniform(0, np.pi)  # Угол в вертикальной плоскости
-
+        if self.target is None:
+            max_reach = self.max_reach()
+            r = np.random.uniform(0, max_reach)
+            theta = np.random.uniform(0, 2 * np.pi)
+            phi = np.random.uniform(0, np.pi)
             self.target = np.array([
-                r * np.sin(phi) * np.cos(theta),  # X
-                r * np.sin(phi) * np.sin(theta),  # Y
-                r * np.cos(phi)                   # Z
+                r * np.sin(phi) * np.cos(theta),
+                r * np.sin(phi) * np.sin(theta),
+                r * np.cos(phi)
             ])
-
-        self.robot = Manipulator7DOF(lengths=self.link_lengths)
+        self.robot.reset()
         return self.get_observation(), {}
-
-    def seed(self, seed=None):
-        """
-        Устанавливает начальное состояние генератора случайных чисел.
-        """
-        self.np_random, seed = gym.utils.seeding.np_random(seed)
-        return [seed]
 
     def step(self, action):
         """
-        Применяет действие и возвращает новое состояние, награду, флаги завершения и дополнительную информацию.
+        Применяет действие и возвращает новое состояние.
         """
         self.robot.joint_angles += action
         reward = self.calculate_reward()
-        terminated = self.is_done()  # Завершение эпизода (например, достижение цели)
-        truncated = False  # Пока не используется ограничение длины эпизода
-        info = {"target": self.target}  # Дополнительная информация о текущей цели
-        return self.get_observation(), reward, terminated, truncated, info
+        terminated = self.is_done()
+        info = {"target": self.target}
+        return self.get_observation(), reward, terminated, False, info
 
     def get_observation(self):
         """
@@ -85,13 +74,10 @@ class ManipulatorEnv(gym.Env):
         stability = self.robot.evaluate_stability()
         energy = self.robot.energy_consumption()
 
-        # Нормализуем значения
-        max_distance = self.max_reach()
-        normalized_distance = distance / max_distance
-        normalized_stability = stability  # Если стабильность уже от 0 до 1
-        normalized_energy = energy / 10.0  # Зависит от модели
+        normalized_distance = distance / self.max_reach()
+        normalized_stability = stability
+        normalized_energy = energy / 10.0
 
-        # Взвешенная функция награды
         reward = -normalized_distance + 0.5 * normalized_stability - 0.1 * normalized_energy
         return reward
 
@@ -101,3 +87,4 @@ class ManipulatorEnv(gym.Env):
         """
         distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
         return distance < 0.05
+

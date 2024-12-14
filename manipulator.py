@@ -112,6 +112,12 @@ class Manipulator7DOF:
         best_solution = min(solutions, key=lambda x: self.objective_function_for_ik(x, target_position))
         return best_solution
 
+    def reset(self):
+        """
+        Сбрасывает углы суставов манипулятора к начальному состоянию.
+        """
+        self.joint_angles = np.zeros(7)
+
     def __str__(self):
         """
         Вывод информации о манипуляторе.

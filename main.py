@@ -43,20 +43,26 @@ if __name__ == '__main__':
                 raise TypeError("Родители должны быть экземплярами Manipulator7DOF.")
 
             # Кроссовер
-            child = crossover(parent1, parent2)
+            try:
+                child1, child2 = crossover(parent1, parent2)
+            except ValueError as e:
+                logging.error(f"Ошибка при выполнении crossover: {e}")
+                continue
 
-            # Проверяем, что кроссовер возвращает корректный объект
-            if not isinstance(child, Manipulator7DOF):
-                raise TypeError("Ошибка: crossover вернул объект, не являющийся Manipulator7DOF.")
+            # Проверка результата кроссовера
+            if not (isinstance(child1, Manipulator7DOF) and isinstance(child2, Manipulator7DOF)):
+                raise TypeError("Ошибка: crossover вернул объекты, не являющиеся Manipulator7DOF.")
 
-            # Мутация
-            child = mutate(child, mutation_rate)
+            # Мутация потомков
+            child1 = mutate(child1, mutation_rate)
+            child2 = mutate(child2, mutation_rate)
 
-            # Проверка после мутации
-            if not isinstance(child, Manipulator7DOF):
+            # Проверка результата мутации
+            if not (isinstance(child1, Manipulator7DOF) and isinstance(child2, Manipulator7DOF)):
                 raise TypeError("Ошибка: mutate вернул объект, не являющийся Manipulator7DOF.")
 
-            new_population.append(child)
+            # Добавляем потомков в новую популяцию
+            new_population.extend([child1, child2])
 
         population = new_population
 
