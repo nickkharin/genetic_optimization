@@ -1,5 +1,3 @@
-# connector.py
-
 import zmq
 
 
@@ -11,12 +9,10 @@ class CoppeliaSimConnector:
         self.socket.connect(f'tcp://localhost:{port}')
 
     def send_request(self, message):
-        """Отправляет запрос в CoppeliaSim и возвращает ответ."""
         self.socket.send_string(message)
         return self.socket.recv_string()
 
     def test_connection(self):
-        """Проверяет соединение, запрашивая версию CoppeliaSim."""
         try:
             response = self.send_request('getVersion')
             print(f"Connected to CoppeliaSim, version {response}")
@@ -26,6 +22,9 @@ class CoppeliaSimConnector:
             return False
 
     def close(self):
-        """Закрывает соединение с CoppeliaSim."""
         self.socket.close()
         self.context.term()
+
+
+
+

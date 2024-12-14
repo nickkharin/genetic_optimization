@@ -1,6 +1,5 @@
-# manipulator_control.py
 import time
-from connector import CoppeliaSimConnector
+from CoppeliaSim_Connector.connector import CoppeliaSimConnector
 
 
 class ManipulatorControl:
@@ -11,9 +10,8 @@ class ManipulatorControl:
 
     def _get_joint_handles(self):
         handles = []
-        # Проходим по новым именам joint0...joint6
         for i in range(7):
-            joint_name = f"/redundantRobot/joint{i}"  # Полный путь к соединению
+            joint_name = f"/redundantRobot/joint{i}"
             handle = self.connector.send_request(f'getObjectHandle:{joint_name}')
             if handle.isdigit():
                 handles.append(int(handle))
@@ -22,22 +20,18 @@ class ManipulatorControl:
         return handles
 
     def set_joint_angles(self, angles):
-        """Устанавливает углы для соединений манипулятора."""
         for handle, angle in zip(self.joint_handles, angles):
             self.connector.send_request(f'setJointTargetPosition:{handle},{angle}')
 
     def set_sphere_position(self, x, y, z):
-        """Устанавливает позицию manipSphere."""
         handle = self.connector.send_request(f'getObjectHandle:/Sphere')
         position_command = f'setObjectPosition:{handle},{x},{y},{z}'
         response = self.connector.send_request(position_command)
 
     def start_simulation(self):
-        """Запускает симуляцию."""
         self.connector.send_request('startSimulation')
 
     def stop_simulation(self):
-        """Останавливает симуляцию."""
         self.connector.send_request('stopSimulation')
 
     def step_simulation(self):

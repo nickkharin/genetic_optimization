@@ -1,144 +1,116 @@
 import numpy as np
 import random
 from scipy.optimize import minimize, Bounds
-from utilities import *
+from utilities import dh_transform
 from functools import lru_cache
+import logging
 
 class Manipulator7DOF:
+    """
+    Класс, представляющий 7-степенный манипулятор.
+    """
+
     def __init__(self, joint_angles=None, lengths=None, link_masses=None, inertia_tensors=None, joint_frictions=None, environment_temp=20):
-        self.joint_angles = joint_angles if joint_angles is not None else [random.uniform(-np.pi, np.pi) for _ in range(7)]
+        """
+        Инициализация манипулятора с возможностью задания длин звеньев и углов суставов.
+        """
         self.lengths = lengths if lengths is not None else [random.uniform(0.5, 2.0) for _ in range(7)]
+        self.joint_angles = joint_angles if joint_angles is not None else [random.uniform(-np.pi, np.pi) for _ in range(len(self.lengths))]
         self.link_masses = link_masses if link_masses is not None else [random.uniform(1.0, 5.0) for _ in range(7)]
         self.inertia_tensors = inertia_tensors if inertia_tensors is not None else [np.eye(3) * random.uniform(0.1, 1.0) for _ in range(7)]
         self.joint_frictions = joint_frictions if joint_frictions is not None else [random.uniform(0.01, 0.05) for _ in range(7)]
-        self.environment_temp = environment_temp  # ambient temperature in degrees Celsius
+        self.environment_temp = environment_temp  # Температура окружающей среды
+
+    def max_reach(self):
+        """
+        Рассчитывает максимальную досягаемость манипулятора.
+        """
+        return sum(self.lengths)
 
     def forward_kinematics(self):
-        """ Calculate the position of each joint using forward kinematics. """
-        T = np.eye(4)  # Identity matrix initialization
+        """
+        Вычисляет положение каждого сустава с помощью прямой кинематики.
+        """
+        T = np.eye(4)
         positions = []
         for i in range(7):
             theta = self.joint_angles[i]
-            a, alpha, d = self.lengths[i], 0, 0
+            a = self.lengths[i]
+            alpha = 0
+            d = 0
             T = np.dot(T, dh_transform(a, alpha, d, theta))
-            positions.append(T[:3, 3])
+            positions.append(T[:3, 3])  # Берём только XYZ-координаты
         return positions
 
     @lru_cache(maxsize=32)
     def inverse_kinematics_multiple_solutions(self, target_position, num_trials=10):
-        """ Generate multiple solutions for inverse kinematics and select the best one. """
+        """
+        Генерирует несколько решений обратной кинематики и выбирает наилучшее.
+        """
         solutions = []
+        bounds = Bounds([-np.pi] * 7, [np.pi] * 7)
         for _ in range(num_trials):
             initial_joint_angles = np.array([random.uniform(-np.pi, np.pi) for _ in range(7)])
-            bounds = Bounds([-np.pi] * 7, [np.pi] * 7)
-            result = minimize(self.objective_function_for_ik, initial_joint_angles, args=(target_position,),
-                              method='SLSQP', bounds=bounds, options={'maxiter': 100, 'disp': False})
+            result = minimize(
+                self.objective_function_for_ik,
+                initial_joint_angles,
+                args=(target_position,),
+                method='SLSQP',
+                bounds=bounds,
+                options={'maxiter': 100, 'disp': False}
+            )
             if result.success:
                 solutions.append(result.x)
+            else:
+                logging.warning("Optimization failed during IK computation.")
 
-        # Evaluate all successful solutions and select the best one
         if solutions:
-            best_solution = self.evaluate_solutions(solutions)
-            return best_solution
+            return self.evaluate_solutions(solutions)
         else:
             raise ValueError("No valid inverse kinematics solution found.")
 
     def objective_function_for_ik(self, joint_angles, target_position):
-        adjusted_angles = self.adjust_for_temperature(joint_angles)
-        self.joint_angles = adjusted_angles
-        current_position = self.forward_kinematics()[-1]
-        return np.linalg.norm(current_position - target_position)
-
-    def adjust_for_temperature(self, joint_angles):
-        # Coefficient for thermal expansion/contraction, simplified assumption
-        thermal_coefficient = 1e-5
-        temperature_effect = (self.environment_temp - 20) * thermal_coefficient
-        return joint_angles * (1 + temperature_effect)
-
-    def adjust_for_environment(self, joint_angles):
-        # Apply friction adjustments
-        friction_adjusted_angles = joint_angles - self.joint_frictions
-        return friction_adjusted_angles
-
-    def calculate_dynamics(self, joint_velocities, joint_accelerations):
-        """ Calculate forces and torques on each joint including inertial, Coriolis, and centrifugal effects. """
-        # Calculate gravitational forces
-        g = 9.81  # Acceleration due to gravity
-        gravitational_forces = [self.link_masses[i] * g for i in range(7)]
-
-        # Calculate inertial forces
-        inertial_forces = [np.dot(self.inertia_tensors[i], joint_accelerations[i]) for i in range(7)]
-
-        # Calculate Coriolis and centrifugal forces
-        coriolis_and_centrifugal_forces = self.calculate_coriolis_and_centrifugal_forces(joint_velocities,
-                                                                                         joint_accelerations)
-
-        # Total forces and torques
-        total_forces = np.add(np.add(gravitational_forces, inertial_forces), coriolis_and_centrifugal_forces)
-        return total_forces
-
-    def calculate_coriolis_and_centrifugal_forces(self, joint_velocities, joint_accelerations):
-        """ Calculate Coriolis and centrifugal forces based on the robot's velocity and acceleration dynamics. """
-        # Placeholder for the Coriolis and centrifugal force calculation (requires Jacobian matrices)
-        # This is a simplified placeholder, and you would need to calculate this properly using the robot's dynamics
-        J = self.calculate_jacobian()
-        # For simplicity, assuming J_dot * q_dot is zero
-        coriolis_and_centrifugal = np.dot(J.T, joint_velocities) * joint_accelerations
-        return coriolis_and_centrifugal
-
-    def calculate_jacobian(self):
-        """ Calculate the Jacobian matrix for the manipulator. """
-        # This is a simplified placeholder calculation for the Jacobian
-        # A proper implementation should calculate the partial derivatives of the end-effector's position with respect to each joint variable
-        J = np.zeros((6, 7))  # Assuming a 6x7 Jacobian for a 7 DOF manipulator
-        return J
+        """
+        Целевая функция для обратной кинематики.
+        """
+        self.joint_angles = joint_angles
+        current_position = self.forward_kinematics()[-1]  # Положение конца манипулятора
+        return np.linalg.norm(current_position - target_position)  # Евклидово расстояние до цели
 
     def calculate_center_of_mass(self):
-        """ Calculate the center of mass of the manipulator. """
+        """
+        Вычисляет центр масс манипулятора.
+        """
         positions = self.forward_kinematics()
         total_mass = sum(self.link_masses)
-        center_of_mass = np.dot(self.link_masses, positions) / total_mass
+        center_of_mass = np.sum(np.array(positions) * np.array(self.link_masses)[:, None], axis=0) / total_mass
         return center_of_mass
 
+    def energy_consumption(self, joint_angles=None):
+        """
+        Вычисляет энергопотребление манипулятора.
+        """
+        if joint_angles is None:
+            joint_angles = self.joint_angles
+        return sum(abs(angle) for angle in joint_angles) * 0.1  # Простая модель энергопотребления
+
+    def evaluate_stability(self):
+        """
+        Комплексная оценка стабильности манипулятора.
+        """
+        com_score = np.linalg.norm(self.calculate_center_of_mass())  # Положение центра масс
+        joint_variability = np.std(self.joint_angles)  # Вариативность углов суставов
+        return 1 / (1 + com_score + joint_variability)  # Итоговая стабильность
+
     def evaluate_solutions(self, solutions):
-        """ Evaluate multiple IK solutions and select the best based on a criterion. """
-        min_energy = float('inf')
-        best_solution = None
-        for solution in solutions:
-            energy = self.energy_consumption(solution)
-            if energy < min_energy:
-                min_energy = energy
-                best_solution = solution
+        """
+        Выбирает наилучшее решение из предложенных.
+        """
+        best_solution = min(solutions, key=lambda x: self.objective_function_for_ik(x, self.forward_kinematics()[-1]))
         return best_solution
 
-    def evaluate_load_distribution(self):
-        """ Evaluate the distribution of load across the joints. """
-        load_variability = np.std(self.joint_angles)
-        return 1 / (1 + load_variability)
-
-    def evaluate_dynamic_stability(self, joint_velocities=None, joint_accelerations=None):
-        if joint_velocities is None:
-            joint_velocities = np.zeros(len(self.joint_angles))
-        if joint_accelerations is None:
-            joint_accelerations = np.zeros(len(self.joint_angles))
-
-        velocity_variability = np.std(joint_velocities)
-        acceleration_variability = np.std(joint_accelerations)
-        return 1 / (1 + velocity_variability + acceleration_variability)
-
-    def evaluate_stability(self, joint_velocities=np.zeros(7), joint_accelerations=np.zeros(7)):
-        com_score = np.linalg.norm(self.calculate_center_of_mass())
-        load_distribution_score = self.evaluate_load_distribution()
-        dynamic_stability_score = self.evaluate_dynamic_stability(joint_velocities, joint_accelerations)
-        return com_score + load_distribution_score + dynamic_stability_score
-
-    def evaluate_distance(self, target):
-        positions = self.forward_kinematics()
-        end_effector_pos = positions[-1]
-        return np.linalg.norm(end_effector_pos - np.array(target))
-
-    def energy_consumption(self):
-        return sum(abs(angle) for angle in self.joint_angles) * 0.1
-
     def __str__(self):
-        return f'Manipulator Angles: {self.joint_angles}, \n Lengths: {self.lengths}'
+        """
+        Вывод информации о манипуляторе.
+        """
+        return f"Manipulator Angles: {self.joint_angles}, Lengths: {self.lengths}"
