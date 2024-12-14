@@ -69,7 +69,15 @@ if __name__ == '__main__':
     ax = fig.add_subplot(111, projection='3d')
 
     # Траектория движения конца эффектора
-    ax.plot(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2], label='Trajectory', marker='o')
+    ax.plot(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2], label='Trajectory', color='blue', marker='o')
+
+    # Начальная точка траектории
+    ax.scatter(trajectory[0, 0], trajectory[0, 1], trajectory[0, 2], color='yellow', label='Start Point', s=100)
+
+    # Финальная точка траектории
+    ax.scatter(trajectory[-1, 0], trajectory[-1, 1], trajectory[-1, 2], color='green', label='End Point', s=100)
+
+    # Целевая точка
     ax.scatter(target[0], target[1], target[2], color='red', label='Target', s=100)
 
     # Подписи осей
