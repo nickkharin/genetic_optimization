@@ -16,12 +16,26 @@ class Manipulator7DOF:
         """
         self.lengths = lengths if lengths is not None else [random.uniform(0.5, 2.0) for _ in range(7)]
         self.joint_angles = joint_angles if joint_angles is not None else [random.uniform(-np.pi, np.pi) for _ in range(len(self.lengths))]
-        self.alphas = alphas if alphas is not None else [random.uniform(-np.pi / 2, np.pi / 2) for _ in range(7)]  # Увеличен диапазон
-        self.ds = ds if ds is not None else [random.uniform(0.1, 1.0) for _ in range(7)]  # Увеличен диапазон
+        self.alphas = alphas if alphas is not None else [random.uniform(-np.pi / 2, np.pi / 2) for _ in range(7)]
+        self.ds = ds if ds is not None else [random.uniform(0.1, 1.0) for _ in range(7)]
         self.link_masses = link_masses if link_masses is not None else [random.uniform(1.0, 5.0) for _ in range(7)]
         self.inertia_tensors = inertia_tensors if inertia_tensors is not None else [np.eye(3) * random.uniform(0.1, 1.0) for _ in range(7)]
         self.joint_frictions = joint_frictions if joint_frictions is not None else [random.uniform(0.01, 0.05) for _ in range(7)]
         self.environment_temp = environment_temp  # Температура окружающей среды
+
+    def get_joint_angles(self):
+        """
+        Возвращает текущие углы суставов манипулятора.
+        """
+        return self.joint_angles
+
+    def set_joint_angles(self, angles):
+        """
+        Устанавливает углы суставов манипулятора.
+        """
+        if len(angles) != len(self.joint_angles):
+            raise ValueError("Количество углов должно совпадать с количеством суставов.")
+        self.joint_angles = angles
 
     def max_reach(self):
         """
@@ -41,7 +55,6 @@ class Manipulator7DOF:
             alpha = self.alphas[i]
             d = self.ds[i]
             T = np.dot(T, dh_transform(a, alpha, d, theta))
-            # Берём XYZ-координаты
             positions.append((T[0, 3], T[1, 3], T[2, 3]))
         return positions
 

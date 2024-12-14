@@ -6,6 +6,47 @@ from mpl_toolkits.mplot3d import Axes3D  # Для 3D графиков
 from reinforcement_learning import ManipulatorEnv
 from stable_baselines3 import PPO
 
+
+def plot_manipulator(ax, joint_angles, link_lengths, base_position):
+    """
+    Отрисовка манипулятора на основе углов суставов и длин звеньев.
+
+    :param ax: matplotlib axis для визуализации
+    :param joint_angles: список углов суставов (в радианах)
+    :param link_lengths: список длин звеньев
+    :param base_position: начальная точка (x, y, z)
+    """
+    x_coords = [base_position[0]]
+    y_coords = [base_position[1]]
+    z_coords = [base_position[2]]
+
+    current_position = np.array(base_position)
+    current_orientation = np.eye(3)  # Начальная ориентация (матрица вращения)
+
+    for angle, length in zip(joint_angles, link_lengths):
+        # Обновляем ориентацию на основе угла сустава
+        rotation_matrix = np.array([
+            [np.cos(angle), -np.sin(angle), 0],
+            [np.sin(angle), np.cos(angle), 0],
+            [0, 0, 1]
+        ])
+        current_orientation = current_orientation @ rotation_matrix
+
+        # Вычисляем новую позицию сустава
+        offset = current_orientation @ np.array([0, 0, length])  # Вектор звена
+        current_position = np.array(current_position, dtype=np.float64) + offset
+
+        x_coords.append(current_position[0])
+        y_coords.append(current_position[1])
+        z_coords.append(current_position[2])
+
+    # Рисуем звенья
+    ax.plot(x_coords, y_coords, z_coords, '-o', color='gray', label='Manipulator')
+    ax.scatter(x_coords, y_coords, z_coords, color='black')  # Суставы
+
+    return ax
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
@@ -85,6 +126,10 @@ if __name__ == '__main__':
 
     # Целевая точка
     ax.scatter(target[0], target[1], target[2], color='red', label='Target', s=100)
+
+    # Отрисовка манипулятора в финальной конфигурации
+    final_joint_angles = env.robot.get_joint_angles()  # Предполагаем, что у модели есть метод для получения углов суставов
+    plot_manipulator(ax, final_joint_angles, optimal_lengths, base_position=[0, 0, 0])
 
     # Подписи осей
     ax.set_xlabel('X-axis')
