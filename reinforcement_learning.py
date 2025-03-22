@@ -1,170 +1,136 @@
+import logging
 import gym
 from gym import spaces
 import numpy as np
-from stable_baselines3 import PPO
-from stable_baselines3.common.env_util import make_vec_env
 from manipulator import Manipulator7DOF
-import matplotlib.pyplot as plt
-
+from utilities import generate_random_target_in_half_sphere
 
 class ManipulatorEnv(gym.Env):
     """
     Среда для обучения манипулятора с использованием RL.
+
+    Улучшения:
+      - distance -> -3.0 * normalized_distance
+      - bonus -> +800
+      - movement penalty -> -0.003
+      - energy penalty -> -0.008
+      - randomize_start=False по умолчанию для более прямолинейных стартов.
     """
-    def __init__(self, link_lengths=None, target_position=None):
+    def __init__(self, link_lengths=None, target_position=None, randomize_start=False):
         super(ManipulatorEnv, self).__init__()
-        self.link_lengths = link_lengths if link_lengths else [1] * 7
+
+        # 7 звеньев по умолчанию
+        self.link_lengths = link_lengths if link_lengths else [1.0] * 7
+        # Создаём манипулятор
         self.robot = Manipulator7DOF(lengths=self.link_lengths)
         self.target = target_position
+        # Отключаем случайный старт по умолчанию
+        self.randomize_start = randomize_start
 
-        # Пространство действий
-        self.action_space = spaces.Box(low=-0.1, high=0.1, shape=(7,), dtype=np.float32)
-
-        # Пространство наблюдений
+        # Действие: ±0.05 рад на каждый сустав
+        self.action_space = spaces.Box(low=-0.05, high=0.05, shape=(7,), dtype=np.float32)
+        # Наблюдение: 7 углов + distance + stability + energy = 10
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(10,), dtype=np.float32)
 
-        # Сохранение траекторий для анализа
+        # Логи
         self.trajectory = []
         self.energy_log = []
+        self.joint_angle_log = []
+
+        # Для эпизодической статистики
+        self.episode_count = 0        # Номер текущего эпизода
+        self.episode_reward = 0.0     # Накопленная награда
+        self.episode_step = 0         # Шаги
 
     def max_reach(self):
-        """
-        Рассчитывает максимальную дальность манипулятора.
-        """
         return np.sum(self.link_lengths)
 
     def reset(self, seed=None, options=None):
-        """
-        Сбрасывает состояние среды и генерирует цель в пределах досягаемости манипулятора.
-        """
         super().reset(seed=seed)
+
+        self.episode_count += 1
+        self.episode_reward = 0.0
+        self.episode_step = 0
+
         if self.target is None:
-            max_reach = self.max_reach()
-            r = np.random.uniform(0, max_reach)
-            theta = np.random.uniform(0, 2 * np.pi)
-            phi = np.random.uniform(0, np.pi)
-            self.target = np.array([
-                r * np.sin(phi) * np.cos(theta),
-                r * np.sin(phi) * np.sin(theta),
-                r * np.cos(phi)
-            ])
+            max_r = self.max_reach()
+            self.target = generate_random_target_in_half_sphere(max_r)
+
         self.robot.reset()
-        self.trajectory = []
-        self.energy_log = []
+
+        # Если включить True, манипулятор стартует из случайных углов
+        if self.randomize_start:
+            random_angles = np.random.uniform(-np.pi, np.pi, size=7)
+            self.robot.set_joint_angles(random_angles)
+
+        self.trajectory.clear()
+        self.energy_log.clear()
+        self.joint_angle_log.clear()
+        self.joint_angle_log.append(self.robot.get_joint_angles().copy())
+
         return self.get_observation(), {}
 
     def step(self, action):
-        """
-        Применяет действие и возвращает новое состояние.
-        """
-        self.robot.joint_angles += action
+        self.episode_step += 1
+
+        current_angles = np.array(self.robot.get_joint_angles(), dtype=np.float32)
+        new_angles = current_angles + action
+        self.robot.set_joint_angles(new_angles)
+
         reward = self.calculate_reward(action)
+        self.episode_reward += reward
+
         terminated = self.is_done()
-        info = {"target": self.target}
+        truncated = False
+
         self.trajectory.append(self.robot.forward_kinematics()[-1])
         self.energy_log.append(self.robot.energy_consumption())
-        return self.get_observation(), reward, terminated, False, info
+        self.joint_angle_log.append(self.robot.get_joint_angles().copy())
+
+        if terminated:
+            distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
+            logging.info(
+                f"Episode {self.episode_count} finished. "
+                f"Steps={self.episode_step}, EpReward={self.episode_reward:.3f}, Distance={distance:.3f}"
+            )
+
+        return self.get_observation(), reward, terminated, truncated, {"target": self.target}
 
     def get_observation(self):
-        """
-        Возвращает текущее состояние среды.
-        """
         distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
         stability = self.robot.evaluate_stability()
         energy = self.robot.energy_consumption()
-        return np.concatenate([self.robot.joint_angles, [distance, stability, energy]])
+        return np.concatenate([self.robot.get_joint_angles(), [distance, stability, energy]])
 
     def calculate_reward(self, action):
-        """
-        Вычисляет награду на основе расстояния до цели, стабильности, энергопотребления и плавности.
-        """
-        distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
+        # Усиленная логика награды
+        current_ee_pos = self.robot.forward_kinematics()[-1]
+        distance = np.linalg.norm(current_ee_pos - self.target)
         stability = self.robot.evaluate_stability()
         energy = self.robot.energy_consumption()
         joint_deltas = np.abs(action)
 
-        normalized_distance = distance / self.max_reach()
-        normalized_stability = stability
+        normalized_distance = distance / (self.max_reach() + 1e-8)
         normalized_energy = energy / 10.0
         trajectory_penalty = np.sum(joint_deltas)
 
+        # Сделаем -3.0 для distance, -0.008 energy, -0.003 movement, +800 за успех
         reward = (
-            -normalized_distance  # Чем ближе к цели, тем лучше
-            + 0.5 * normalized_stability  # Стабильность
-            - 0.1 * normalized_energy  # Штраф за энергозатраты
-            - 0.05 * trajectory_penalty  # Штраф за резкие движения
+            -3.0 * normalized_distance
+            + 0.3 * stability
+            - 0.008 * normalized_energy
+            - 0.003 * trajectory_penalty
         )
 
-        # Бонус за достижение цели
+        # Усиленный бонус
         if distance < 0.05:
-            reward += 100
+            reward += 800.0
+
         return reward
 
     def is_done(self):
-        """
-        Проверяет, достиг ли манипулятор цели.
-        """
         distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
         return distance < 0.05
 
-
-if __name__ == "__main__":
-    link_lengths = [1.0, 1.5, 1.0, 0.8, 0.6, 0.5, 0.3]
-
-    env = make_vec_env(ManipulatorEnv, n_envs=4, env_kwargs={"link_lengths": link_lengths})
-
-    model = PPO(
-        "MlpPolicy",
-        env,
-        verbose=1,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2
-    )
-
-    model.learn(total_timesteps=100000)
-    model.save("ppo_manipulator")
-
-    test_env = ManipulatorEnv(link_lengths=link_lengths, target_position=np.array([2.0, 2.0, 0.5]))
-    obs, _ = test_env.reset()
-    done = False
-
-    rewards = []
-    distances = []
-
-    while not done:
-        action, _ = model.predict(obs)
-        obs, reward, done, _, info = test_env.step(action)
-        rewards.append(reward)
-        distances.append(np.linalg.norm(info['target'] - test_env.robot.forward_kinematics()[-1]))
-        print(f"Reward: {reward}, Observation: {obs}, Target: {info['target']}")
-
-    # Визуализация наград
-    plt.figure()
-    plt.plot(rewards, label="Reward")
-    plt.xlabel("Steps")
-    plt.ylabel("Reward")
-    plt.title("Reward vs Steps")
-    plt.legend()
-    plt.show()
-
-    # Визуализация расстояния
-    plt.figure()
-    plt.plot(distances, label="Distance to Target")
-    plt.xlabel("Steps")
-    plt.ylabel("Distance")
-    plt.title("Distance to Target vs Steps")
-    plt.legend()
-    plt.show()
-
-    # Визуализация энергозатрат
-    plt.figure()
-    plt.plot(test_env.energy_log, label="Energy Consumption")
-    plt.xlabel("Steps")
-    plt.ylabel("Energy")
-    plt.title("Energy Consumption vs Steps")
-    plt.legend()
-    plt.show()
+    def get_joint_angle_log(self):
+        return np.array(self.joint_angle_log)

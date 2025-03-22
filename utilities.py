@@ -1,5 +1,6 @@
 import numpy as np
 import logging
+import random
 
 
 def dh_transform(a: float, alpha: float, d: float, theta: float) -> np.ndarray:
@@ -26,3 +27,18 @@ def dh_transform(a: float, alpha: float, d: float, theta: float) -> np.ndarray:
     ])
     logging.debug(f"DH Transform: a={a}, alpha={alpha}, d={d}, theta={theta} -> Matrix={matrix}")
     return matrix
+
+def generate_random_target_in_half_sphere(max_r):
+    """
+    Генерирует случайную точку (x,y,z) над землёй (z>=0),
+    в полусфере радиуса max_r, центр в (0,0,0).
+    """
+    r = max_r * (random.random() ** (1/3))
+    theta = random.uniform(0, 2 * np.pi)
+    phi = random.uniform(0, np.pi / 2)  # только верхняя полусфера
+
+    x = r * np.sin(phi) * np.cos(theta)
+    y = r * np.sin(phi) * np.sin(theta)
+    z = r * np.cos(phi)  # z>=0
+
+    return np.array([x, y, z])

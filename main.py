@@ -1,93 +1,41 @@
-from genetic import *
-from optimizer import GeneticAlgorithmOptimizer, decode_action
+import logging
+import json
+
+from genetic import genetic_algorithm, Manipulator7DOF
 from reinforcement_learning import ManipulatorEnv
 from stable_baselines3 import PPO
-import logging
-import numpy as np
-import json
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
-    # --- Этап 1: Оптимизация длин звеньев ---
-    logging.info("Этап 1: Оптимизация длин звеньев с использованием генетического алгоритма.")
+    # --- Этап 1: Оптимизация длин звеньев (GA) ---
+    logging.info("Этап 1: Оптимизация длин звеньев (GA) по нескольким точкам в полусфере.")
 
-    num_states = 50
-    optimizer = GeneticAlgorithmOptimizer(num_states=num_states, actions=range(5))
-    current_state = 0
+    # Зафиксированные параметры GA
+    num_generations = 150
+    pop_size = 100
+    mutation_rate = 0.1  # Фиксированная скорость мутации
+    num_links = 7
 
-    num_generations = 50
-    num_parents = 4
-    best_fitness = float('inf')
-    num_links = 7  # Количество звеньев манипулятора
+    # Параметры «многоцелевого» фитнеса
+    n_samples = 5   # 5 случайных целей на каждую оценку
+    max_r = 3.0     # радиус полусферы
 
-    # Генерация начальной популяции
-    population = generate_initial_population(pop_size=50, num_links=num_links)
-    target = [2, 2, 0.2]  # Трехмерная цель (X, Y, Z)
+    # Запуск GA (новая функция с «глобальной элитностью» внутри)
+    best_robot = genetic_algorithm(
+        pop_size=pop_size,
+        num_generations=num_generations,
+        mutation_rate=mutation_rate,
+        num_links=num_links,
+        n_samples=n_samples,
+        max_r=max_r
+    )
 
-    for generation in range(num_generations):
-        action = optimizer.choose_action(current_state)
-        mutation_rate, pop_size = decode_action(action)
-
-        # Оценка текущей популяции
-        fitness_scores = [multi_criteria_fitness(robot, target) for robot in population]
-        parents = select_parents(population, fitness_scores, num_parents)
-
-        # Элитарность: сохраняем лучших родителей
-        new_population = parents.copy()
-
-        while len(new_population) < len(population):
-            parent1, parent2 = random.sample(parents, 2)
-
-            # Проверяем корректность входных данных
-            if not isinstance(parent1, Manipulator7DOF) or not isinstance(parent2, Manipulator7DOF):
-                raise TypeError("Родители должны быть экземплярами Manipulator7DOF.")
-
-            # Кроссовер
-            try:
-                child1, child2 = crossover(parent1, parent2)
-            except ValueError as e:
-                logging.error(f"Ошибка при выполнении crossover: {e}")
-                continue
-
-            # Проверка результата кроссовера
-            if not (isinstance(child1, Manipulator7DOF) and isinstance(child2, Manipulator7DOF)):
-                raise TypeError("Ошибка: crossover вернул объекты, не являющиеся Manipulator7DOF.")
-
-            # Мутация потомков
-            child1 = mutate(child1, mutation_rate)
-            child2 = mutate(child2, mutation_rate)
-
-            # Проверка результата мутации
-            if not (isinstance(child1, Manipulator7DOF) and isinstance(child2, Manipulator7DOF)):
-                raise TypeError("Ошибка: mutate вернул объект, не являющийся Manipulator7DOF.")
-
-            # Добавляем потомков в новую популяцию
-            new_population.extend([child1, child2])
-
-        population = new_population
-
-        fitness_scores = [multi_criteria_fitness(robot, target) for robot in population]
-        new_best_fitness = min(fitness_scores)
-        logging.info(f"Generation {generation + 1}: Best Fitness = {new_best_fitness}")
-
-        if new_best_fitness < best_fitness:
-            reward = best_fitness - new_best_fitness
-            best_fitness = new_best_fitness
-        else:
-            reward = 0
-
-        next_state = optimizer.get_next_state(current_state, reward)
-        optimizer.update_q_table(current_state, action, reward, next_state)
-        current_state = next_state
-
-    # Сохранение лучших длин звеньев
-    best_index = np.argmin(fitness_scores)
-    best_robot = population[best_index]
+    # Извлекаем лучшие длины звеньев
     optimal_lengths = best_robot.lengths
-    logging.info(f"Лучшие длины звеньев: {optimal_lengths}, Fitness: {fitness_scores[best_index]}")
+    logging.info(f"Лучшие длины звеньев (GA): {optimal_lengths}")
 
-    # Запись длин звеньев в файл JSON
+    # Сохраняем их в JSON
     try:
         with open("optimal_lengths.json", "w") as f:
             json.dump(optimal_lengths, f)
@@ -95,16 +43,13 @@ if __name__ == '__main__':
     except Exception as e:
         logging.error(f"Ошибка при сохранении длин звеньев: {e}")
 
-    # --- Этап 2: Управление углами суставов ---
-    logging.info("Этап 2: Обучение управления углами суставов с фиксированными длинами звеньев.")
+    # --- Этап 2: Обучение RL (PPO) ---
+    logging.info("Этап 2: Обучение RL (PPO) с найденной конфигурацией звеньев.")
 
-    # Создание среды с фиксированными длинами звеньев
+    # Создаём среду с фиксированными длинами звеньев
     env = ManipulatorEnv(link_lengths=optimal_lengths)
 
-    # Проверка цели в 3D и настройка среды
-    logging.info(f"Цель установлена в координатах (X: {target[0]}, Y: {target[1]}, Z: {target[2]})")
-
-    # Обучение RL-агента
+    # Обучение PPO
     model = PPO(
         "MlpPolicy",
         env,
@@ -116,8 +61,7 @@ if __name__ == '__main__':
         gae_lambda=0.95,
         clip_range=0.2
     )
-    model.learn(total_timesteps=100000)
-
-    # Сохранение обученной модели
+    model.learn(total_timesteps=300000)
     model.save("ppo_manipulator")
-    logging.info("Обучение завершено. Модель сохранена как 'ppo_manipulator'.")
+
+    logging.info("Обучение RL завершено. Модель сохранена как 'ppo_manipulator'.")
