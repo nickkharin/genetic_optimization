@@ -19,16 +19,16 @@ if __name__ == '__main__':
 
     # Параметры «многоцелевого» фитнеса
     n_samples = 5   # 5 случайных целей на каждую оценку
-    max_r = 3.0     # радиус полусферы
+    R = 3.0     # радиус полусферы
 
     # Запуск GA (новая функция с «глобальной элитностью» внутри)
     best_robot = genetic_algorithm(
-        pop_size=pop_size,
-        num_generations=num_generations,
-        mutation_rate=mutation_rate,
-        num_links=num_links,
-        n_samples=n_samples,
-        max_r=max_r
+        pop_size=80,
+        num_generations=100,
+        mutation_rate=0.1,
+        num_links=7,
+        n_samples=5,
+        max_r=R
     )
 
     # Извлекаем лучшие длины звеньев
@@ -47,7 +47,11 @@ if __name__ == '__main__':
     logging.info("Этап 2: Обучение RL (PPO) с найденной конфигурацией звеньев.")
 
     # Создаём среду с фиксированными длинами звеньев
-    env = ManipulatorEnv(link_lengths=optimal_lengths)
+    env = ManipulatorEnv(
+        link_lengths=optimal_lengths,
+        randomize_start=False,
+        radius=R
+    )
 
     # Обучение PPO
     model = PPO(

@@ -6,6 +6,7 @@ from mpl_toolkits.mplot3d import Axes3D  # иногда нужно явно
 from reinforcement_learning import ManipulatorEnv
 from stable_baselines3 import PPO
 
+
 def plot_manipulator(ax, robot, base_position=[0, 0, 0]):
     """
     Отрисовка манипулятора на основе реальной кинематики из `robot`.
@@ -26,7 +27,9 @@ def plot_manipulator(ax, robot, base_position=[0, 0, 0]):
     ax.scatter(x_coords, y_coords, z_coords, color='black')  # суставы
     return ax
 
+
 if __name__ == '__main__':
+    R = 3.0
     logging.basicConfig(level=logging.INFO)
 
     # Загрузка оптимальных длин звеньев
@@ -38,33 +41,37 @@ if __name__ == '__main__':
         logging.error("Файл optimal_lengths.json не найден. Проверьте выполнение первого этапа.")
         raise
 
-    # Создаём окружение для тестирования
-    # Теперь НЕ передаём фиксированную цель, чтобы среда сама генерировала её в полусфере
-    env = ManipulatorEnv(link_lengths=optimal_lengths)
+    # Создаём окружение для тестирования (радиус=R, randomize_start=False)
+    env = ManipulatorEnv(link_lengths=optimal_lengths, randomize_start=False, radius=R)
 
     # Загружаем обученную модель
     model = PPO.load("ppo_manipulator")
     logging.info("Модель успешно загружена.")
 
-    # Подготовка к тесту
+    # Готовим лог
     trajectory = []
     distances = []
     rewards = []
 
-    # Сбрасываем среду (используем её стандартное начало -> случайная цель)
+    logging.info("Начало тестирования...")
+
+    # Сбрасываем среду
     obs, _ = env.reset()
+
+    # Сразу сохраняем начальную позицию эффектора (до каких-либо действий)
+    start_position = env.robot.forward_kinematics()[-1]
+    trajectory.append(start_position)
+    start_distance = np.linalg.norm(start_position - env.target)
+    distances.append(start_distance)
+    rewards.append(0.0)  # Нулевая награда до первого шага
 
     done = False
     total_reward = 0
     step = 0
-
-    # Увеличиваем лимит шагов до 3000
     max_steps = 3000
 
-    logging.info("Начало тестирования...")
-
     while not done and step < max_steps:
-        # Детерминированный режим (лучшая политика без шума)
+        # Детерминированный режим
         action, _ = model.predict(obs, deterministic=True)
 
         obs, reward, done, truncated, info = env.step(action)
@@ -72,10 +79,8 @@ if __name__ == '__main__':
         step += 1
 
         current_position = env.robot.forward_kinematics()[-1]
-        # Текущая цель хранится в env.target
         distance = np.linalg.norm(current_position - env.target)
-
-        logging.info(f"Step {step}: Reward = {reward:.3f}, Distance to Target = {distance:.3f}")
+        logging.info(f"Step {step}: Reward={reward:.3f}, Distance={distance:.3f}")
 
         trajectory.append(current_position)
         distances.append(distance)
@@ -92,16 +97,28 @@ if __name__ == '__main__':
     ax = fig.add_subplot(111, projection='3d')
 
     # Путь конца эффектора
-    ax.plot(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2],
-            label='Trajectory', color='blue', marker='o')
+    ax.plot(
+        trajectory[:, 0],
+        trajectory[:, 1],
+        trajectory[:, 2],
+        label='Trajectory',
+        color='blue',
+        marker='o'
+    )
 
     # Начальная, конечная точка, случайная цель
-    ax.scatter(trajectory[0, 0], trajectory[0, 1], trajectory[0, 2],
-               color='yellow', label='Start Point', s=100)
-    ax.scatter(trajectory[-1, 0], trajectory[-1, 1], trajectory[-1, 2],
-               color='green', label='End Point', s=100)
-    ax.scatter(env.target[0], env.target[1], env.target[2],
-               color='red', label='Target', s=100)
+    ax.scatter(
+        trajectory[0, 0], trajectory[0, 1], trajectory[0, 2],
+        color='yellow', label='Start Point', s=100
+    )
+    ax.scatter(
+        trajectory[-1, 0], trajectory[-1, 1], trajectory[-1, 2],
+        color='green', label='End Point', s=100
+    )
+    ax.scatter(
+        env.target[0], env.target[1], env.target[2],
+        color='red', label='Target', s=100
+    )
 
     # Отрисовка манипулятора (последняя конфигурация)
     plot_manipulator(ax, env.robot, base_position=[0, 0, 0])

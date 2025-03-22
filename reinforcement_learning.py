@@ -5,18 +5,26 @@ import numpy as np
 from manipulator import Manipulator7DOF
 from utilities import generate_random_target_in_half_sphere
 
+
 class ManipulatorEnv(gym.Env):
     """
     Среда для обучения манипулятора с использованием RL.
 
-    Улучшения:
-      - distance -> -3.0 * normalized_distance
-      - bonus -> +800
-      - movement penalty -> -0.003
-      - energy penalty -> -0.008
-      - randomize_start=False по умолчанию для более прямолинейных стартов.
+    - Параметр radius=3.0 по умолчанию, вместо использования self.max_reach().
+    - distance -> -3.0 * normalized_distance
+    - bonus -> +800
+    - movement penalty -> -0.003
+    - energy penalty -> -0.008
+    - randomize_start=False по умолчанию.
     """
-    def __init__(self, link_lengths=None, target_position=None, randomize_start=False):
+
+    def __init__(
+            self,
+            link_lengths=None,
+            target_position=None,
+            randomize_start=False,
+            radius=3.0
+    ):
         super(ManipulatorEnv, self).__init__()
 
         # 7 звеньев по умолчанию
@@ -24,13 +32,19 @@ class ManipulatorEnv(gym.Env):
         # Создаём манипулятор
         self.robot = Manipulator7DOF(lengths=self.link_lengths)
         self.target = target_position
-        # Отключаем случайный старт по умолчанию
+        # По умолчанию отключаем случайный старт
         self.randomize_start = randomize_start
+        # Новый параметр: радиус полусферы
+        self.radius = radius
 
         # Действие: ±0.05 рад на каждый сустав
-        self.action_space = spaces.Box(low=-0.05, high=0.05, shape=(7,), dtype=np.float32)
+        self.action_space = spaces.Box(
+            low=-0.05, high=0.05, shape=(7,), dtype=np.float32
+        )
         # Наблюдение: 7 углов + distance + stability + energy = 10
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(10,), dtype=np.float32)
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(10,), dtype=np.float32
+        )
 
         # Логи
         self.trajectory = []
@@ -38,11 +52,12 @@ class ManipulatorEnv(gym.Env):
         self.joint_angle_log = []
 
         # Для эпизодической статистики
-        self.episode_count = 0        # Номер текущего эпизода
-        self.episode_reward = 0.0     # Накопленная награда
-        self.episode_step = 0         # Шаги
+        self.episode_count = 0
+        self.episode_reward = 0.0
+        self.episode_step = 0
 
     def max_reach(self):
+        # Можно оставить, если нужно где-то
         return np.sum(self.link_lengths)
 
     def reset(self, seed=None, options=None):
@@ -52,9 +67,9 @@ class ManipulatorEnv(gym.Env):
         self.episode_reward = 0.0
         self.episode_step = 0
 
+        # Если цель не задана, генерируем случайную в полусфере радиуса self.radius
         if self.target is None:
-            max_r = self.max_reach()
-            self.target = generate_random_target_in_half_sphere(max_r)
+            self.target = generate_random_target_in_half_sphere(self.radius)
 
         self.robot.reset()
 
@@ -88,19 +103,27 @@ class ManipulatorEnv(gym.Env):
         self.joint_angle_log.append(self.robot.get_joint_angles().copy())
 
         if terminated:
-            distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
+            distance = np.linalg.norm(
+                self.robot.forward_kinematics()[-1] - self.target
+            )
             logging.info(
                 f"Episode {self.episode_count} finished. "
-                f"Steps={self.episode_step}, EpReward={self.episode_reward:.3f}, Distance={distance:.3f}"
+                f"Steps={self.episode_step}, "
+                f"EpReward={self.episode_reward:.3f}, Distance={distance:.3f}"
             )
 
         return self.get_observation(), reward, terminated, truncated, {"target": self.target}
 
     def get_observation(self):
-        distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
+        distance = np.linalg.norm(
+            self.robot.forward_kinematics()[-1] - self.target
+        )
         stability = self.robot.evaluate_stability()
         energy = self.robot.energy_consumption()
-        return np.concatenate([self.robot.get_joint_angles(), [distance, stability, energy]])
+        return np.concatenate([
+            self.robot.get_joint_angles(),
+            [distance, stability, energy]
+        ])
 
     def calculate_reward(self, action):
         # Усиленная логика награды
@@ -110,16 +133,18 @@ class ManipulatorEnv(gym.Env):
         energy = self.robot.energy_consumption()
         joint_deltas = np.abs(action)
 
-        normalized_distance = distance / (self.max_reach() + 1e-8)
+        # Не используем self.max_reach() в distance
+        normalized_distance = distance / (self.radius + 1e-8)
+
         normalized_energy = energy / 10.0
         trajectory_penalty = np.sum(joint_deltas)
 
         # Сделаем -3.0 для distance, -0.008 energy, -0.003 movement, +800 за успех
         reward = (
-            -3.0 * normalized_distance
-            + 0.3 * stability
-            - 0.008 * normalized_energy
-            - 0.003 * trajectory_penalty
+                -3.0 * normalized_distance
+                + 0.3 * stability
+                - 0.008 * normalized_energy
+                - 0.003 * trajectory_penalty
         )
 
         # Усиленный бонус
@@ -129,7 +154,9 @@ class ManipulatorEnv(gym.Env):
         return reward
 
     def is_done(self):
-        distance = np.linalg.norm(self.robot.forward_kinematics()[-1] - self.target)
+        distance = np.linalg.norm(
+            self.robot.forward_kinematics()[-1] - self.target
+        )
         return distance < 0.05
 
     def get_joint_angle_log(self):
