@@ -2,10 +2,9 @@ import logging
 import json
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # иногда нужно явно
+from mpl_toolkits.mplot3d import Axes3D
 from reinforcement_learning import ManipulatorEnv
 from stable_baselines3 import PPO
-
 
 def plot_manipulator(ax, robot, base_position=[0, 0, 0]):
     """
@@ -27,43 +26,59 @@ def plot_manipulator(ax, robot, base_position=[0, 0, 0]):
     ax.scatter(x_coords, y_coords, z_coords, color='black')  # суставы
     return ax
 
-
 if __name__ == '__main__':
     R = 3.0
     logging.basicConfig(level=logging.INFO)
 
-    # Загрузка оптимальных длин звеньев
     try:
         with open("optimal_lengths.json", "r") as f:
             optimal_lengths = json.load(f)
-        logging.info(f"Оптимальные длины звеньев успешно загружены: {optimal_lengths}")
+        logging.info(f"Оптимальные длины звеньев: {optimal_lengths}")
     except FileNotFoundError:
-        logging.error("Файл optimal_lengths.json не найден. Проверьте выполнение первого этапа.")
+        logging.error("optimal_lengths.json не найден.")
         raise
 
-    # Создаём окружение для тестирования (радиус=R, randomize_start=False)
+    # Создаём среду (randomize_start=False) с радиусом R
     env = ManipulatorEnv(link_lengths=optimal_lengths, randomize_start=False, radius=R)
 
-    # Загружаем обученную модель
+    # Загружаем модель PPO
     model = PPO.load("ppo_manipulator")
     logging.info("Модель успешно загружена.")
 
-    # Готовим лог
+    # Логи для построения траектории
     trajectory = []
     distances = []
     rewards = []
 
-    logging.info("Начало тестирования...")
-
     # Сбрасываем среду
     obs, _ = env.reset()
 
-    # Сразу сохраняем начальную позицию эффектора (до каких-либо действий)
+    # 1) Считаем суммарную длину звеньев
+    sum_len = sum(optimal_lengths)
+    # 2) Точка (0, 0, sum_len), предполагаем идеальную "вертикаль"
+    vertical_target = np.array([0.0, 0.0, sum_len])
+
+    try:
+        # Предполагаем, что в manipulator.py есть:
+        #   def inverse_kinematics_multiple_solutions(self, target_position, num_trials=10):
+        # Если нет или не получилось, используем fallback
+        best_angles = env.robot.inverse_kinematics_multiple_solutions(vertical_target)
+        env.robot.set_joint_angles(best_angles)
+        logging.info(f"Установлены углы IK для вертикали: {best_angles}")
+    except Exception as e:
+        logging.warning(f"Не удалось найти IK для (0,0,{sum_len}): {e}")
+        # fallback — вручную зададим набор углов
+        # Подберите, если нужно, более подходящие для вашей DH-конфигурации
+        vertical_angles = [0.0, -np.pi/2, 0.0, 0.0, 0.0, 0.0, 0.0]
+        env.robot.set_joint_angles(vertical_angles)
+        logging.info(f"Fallback: задали вручную углы = {vertical_angles}")
+
+    # Записываем стартовую точку (после установки вертикали)
     start_position = env.robot.forward_kinematics()[-1]
     trajectory.append(start_position)
     start_distance = np.linalg.norm(start_position - env.target)
     distances.append(start_distance)
-    rewards.append(0.0)  # Нулевая награда до первого шага
+    rewards.append(0.0)
 
     done = False
     total_reward = 0
@@ -73,17 +88,16 @@ if __name__ == '__main__':
     while not done and step < max_steps:
         # Детерминированный режим
         action, _ = model.predict(obs, deterministic=True)
-
         obs, reward, done, truncated, info = env.step(action)
         total_reward += reward
         step += 1
 
         current_position = env.robot.forward_kinematics()[-1]
-        distance = np.linalg.norm(current_position - env.target)
-        logging.info(f"Step {step}: Reward={reward:.3f}, Distance={distance:.3f}")
+        dist = np.linalg.norm(current_position - env.target)
+        logging.info(f"Step {step}: Reward={reward:.3f}, Distance={dist:.3f}")
 
         trajectory.append(current_position)
-        distances.append(distance)
+        distances.append(dist)
         rewards.append(reward)
 
     if done:
@@ -91,12 +105,12 @@ if __name__ == '__main__':
     else:
         logging.info(f"Тест завершён: лимит шагов. Итоговая награда: {total_reward:.3f}, Шаги: {step}")
 
-    # Визуализация 3D
+    # Визуализация
     trajectory = np.array(trajectory)
     fig = plt.figure(figsize=(10, 6))
     ax = fig.add_subplot(111, projection='3d')
 
-    # Путь конца эффектора
+    # Траектория
     ax.plot(
         trajectory[:, 0],
         trajectory[:, 1],
@@ -106,22 +120,33 @@ if __name__ == '__main__':
         marker='o'
     )
 
-    # Начальная, конечная точка, случайная цель
     ax.scatter(
-        trajectory[0, 0], trajectory[0, 1], trajectory[0, 2],
-        color='yellow', label='Start Point', s=100
+        trajectory[0, 0],
+        trajectory[0, 1],
+        trajectory[0, 2],
+        color='yellow',
+        label='Start Point',
+        s=100
     )
     ax.scatter(
-        trajectory[-1, 0], trajectory[-1, 1], trajectory[-1, 2],
-        color='green', label='End Point', s=100
+        trajectory[-1, 0],
+        trajectory[-1, 1],
+        trajectory[-1, 2],
+        color='green',
+        label='End Point',
+        s=100
     )
     ax.scatter(
-        env.target[0], env.target[1], env.target[2],
-        color='red', label='Target', s=100
+        env.target[0],
+        env.target[1],
+        env.target[2],
+        color='red',
+        label='Target',
+        s=100
     )
 
     # Отрисовка манипулятора (последняя конфигурация)
-    plot_manipulator(ax, env.robot, base_position=[0, 0, 0])
+    plot_manipulator(ax, env.robot, [0,0,0])
 
     ax.set_xlabel('X-axis')
     ax.set_ylabel('Y-axis')
