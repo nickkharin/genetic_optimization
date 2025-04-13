@@ -213,9 +213,18 @@ if __name__ == '__main__':
 
     plot_manipulator(ax, env.robot, [0, 0, 0])
 
+    # **Новый код**: рисуем «пол» (z=0) как 2D-плоскость
+    plane_size = 5.0  # можно менять
+    xx, yy = np.meshgrid(
+        np.linspace(-plane_size, plane_size, 2),
+        np.linspace(-plane_size, plane_size, 2)
+    )
+    zz = np.zeros_like(xx)  # z=0
+    ax.plot_surface(xx, yy, zz, color='brown', alpha=0.2)
+
     ax.set_xlabel('X-axis')
     ax.set_ylabel('Y-axis')
     ax.set_zlabel('Z-axis')
-    ax.set_title('Manipulator End-Effector Trajectory')
+    ax.set_title('Manipulator End-Effector Trajectory (with floor)')
     ax.legend()
     plt.show()
