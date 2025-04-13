@@ -1,7 +1,9 @@
 import numpy as np
 import random
+import json
+
 from manipulator import Manipulator7DOF
-from utilities import generate_random_target_in_half_sphere  # используем для многоцелевого фитнеса
+from utilities import generate_random_target_in_half_sphere
 
 
 def crossover(parent1, parent2):
@@ -78,9 +80,9 @@ def generate_initial_population(pop_size, num_links, min_length=0.5, max_length=
     return population
 
 
-def multi_criteria_fitness_single(robot, target):
+def multi_criteria_fitness_single_details(robot, target):
     """
-    Логика оценки для одной-единственной цели.
+    Вычисляет fitness, а также возвращает фактическую дистанцию и энергию.
     """
     if not isinstance(robot, Manipulator7DOF):
         raise TypeError("Аргумент должен быть объектом Manipulator7DOF.")
@@ -91,11 +93,13 @@ def multi_criteria_fitness_single(robot, target):
 
     # Если цель за пределами макс. досягаемости, штраф
     if distance_to_target > max_reach_val:
-        return -5.0
+        # fitness = -5, возвращаем distance и energy
+        return -5.0, distance_to_target, robot.energy_consumption()
 
-    distance_score = -2.0 * distance_to_target  # чем меньше distance, тем выше фитнес
+    distance_score = -2.0 * distance_to_target
     stability_score = robot.evaluate_stability()
-    energy_score = -robot.energy_consumption()  # больше энергии -> хуже
+    energy_now = robot.energy_consumption()
+    energy_score = -energy_now  # больше энергии -> хуже
     reachability_bonus = max_reach_val * 0.2
 
     fitness = (
@@ -104,30 +108,37 @@ def multi_criteria_fitness_single(robot, target):
         + 0.1 * energy_score
         + reachability_bonus
     )
-    return fitness
+    return fitness, distance_to_target, energy_now
 
 
-def multi_criteria_fitness_multi(robot, n_samples=5, max_r=3.0):
+def multi_criteria_fitness_multi_details(robot, n_samples=5, max_r=3.0):
     """
-    Оцениваем фитнес робота по нескольким СЛУЧАЙНЫМ точкам в верхней полусфере радиуса max_r
-    и берём среднее.
+    Возвращает усреднённые (fitness, distance, energy) по нескольким точкам.
     """
     total_fitness = 0.0
+    total_distance = 0.0
+    total_energy = 0.0
+
     for _ in range(n_samples):
         random_target = generate_random_target_in_half_sphere(max_r)
-        f_single = multi_criteria_fitness_single(robot, random_target)
+        f_single, dist_single, energy_single = multi_criteria_fitness_single_details(robot, random_target)
         total_fitness += f_single
-    return total_fitness / n_samples
+        total_distance += dist_single
+        total_energy += energy_single
+
+    avg_fitness = total_fitness / n_samples
+    avg_distance = total_distance / n_samples
+    avg_energy = total_energy / n_samples
+
+    return avg_fitness, avg_distance, avg_energy
 
 
 def genetic_algorithm(pop_size, num_generations, mutation_rate, num_links,
                       n_samples=5, max_r=3.0):
     """
     Основной цикл генетического алгоритма.
-    Оцениваем каждого робота на n_samples целей в полусфере радиуса max_r.
-    Глобальная элитность: сохраняем лучшую особь за все поколения.
-
-    + Защита от ситуации, когда select_parents вернёт очень мало родителей (избегаем бесконечного цикла).
+    Теперь мы используем функции, возвращающие также среднюю дистанцию и энергию,
+    чтобы собрать более подробную статистику в history.
     """
     population = generate_initial_population(pop_size, num_links)
 
@@ -135,20 +146,45 @@ def genetic_algorithm(pop_size, num_generations, mutation_rate, num_links,
     global_best_fitness = float('-inf')
     global_best_robot = None
 
+    # Список для логирования динамики поколений
+    history = []
+
     for generation in range(num_generations):
         fitness_scores = []
+        distances_list = []
+        energies_list = []
+
+        # Оценка популяции
         for robot in population:
-            score = multi_criteria_fitness_multi(robot, n_samples, max_r)
-            fitness_scores.append(score)
+            # Используем детальную функцию
+            avg_fit, avg_dist, avg_en = multi_criteria_fitness_multi_details(
+                robot, n_samples, max_r
+            )
+            fitness_scores.append(avg_fit)
+            distances_list.append(avg_dist)
+            energies_list.append(avg_en)
 
-        # Лучшая особь в ТЕКУЩЕМ поколении
-        best_fitness = max(fitness_scores)
-        best_robot = population[np.argmax(fitness_scores)]
+        avg_fitness = float(np.mean(fitness_scores))
+        best_fitness = float(max(fitness_scores))
+        best_index = int(np.argmax(fitness_scores))
+        best_robot = population[best_index]
 
-        print(f"Generation {generation + 1}: Best fitness = {best_fitness:.3f}, "
-              f"Best lengths = {best_robot.lengths}")
+        avg_distance = float(np.mean(distances_list))
+        avg_energy = float(np.mean(energies_list))
 
-        # Сравниваем с глобальным максимумом
+        print(f"Generation {generation + 1}: best_fitness={best_fitness:.3f}, "
+              f"avg_fitness={avg_fitness:.3f}, avg_dist={avg_distance:.3f}, avg_energy={avg_energy:.3f}")
+
+        # Логируем текущие результаты
+        history.append({
+            'generation': generation + 1,
+            'best_fitness': best_fitness,
+            'avg_fitness': avg_fitness,
+            'avg_distance': avg_distance,
+            'avg_energy': avg_energy
+        })
+
+        # Проверяем глобальный максимум
         if best_fitness > global_best_fitness:
             import copy
             global_best_fitness = best_fitness
@@ -164,13 +200,11 @@ def genetic_algorithm(pop_size, num_generations, mutation_rate, num_links,
         # Создаём новую популяцию
         new_population = []
         while len(new_population) < pop_size:
-            # Берём случайных родителей
             p1, p2 = random.sample(parents, 2)
             try:
                 child1, child2 = crossover(p1, p2)
             except ValueError as e:
                 print(f"Ошибка при кроссовере: {e}")
-                # fallback — пропуск итерации
                 continue
 
             child1 = mutate(child1, mutation_rate)
@@ -178,13 +212,24 @@ def genetic_algorithm(pop_size, num_generations, mutation_rate, num_links,
 
             new_population.extend([child1, child2])
 
-        # Можно обрезать, если вдруг перекрыли размер
         population = new_population[:pop_size]
 
-    # Оценка финальной популяции (необязательно)
-    fitness_scores = [multi_criteria_fitness_multi(robot, n_samples, max_r) for robot in population]
-    last_gen_best_fitness = max(fitness_scores)
-    last_gen_best_robot = population[np.argmax(fitness_scores)]
+    # Оценка финальной популяции
+    final_fitness_scores = []
+    final_distances = []
+    final_energies = []
+
+    for robot in population:
+        fit_val, dist_val, en_val = multi_criteria_fitness_multi_details(
+            robot, n_samples, max_r
+        )
+        final_fitness_scores.append(fit_val)
+        final_distances.append(dist_val)
+        final_energies.append(en_val)
+
+    last_gen_best_fitness = max(final_fitness_scores)
+    last_gen_best_robot = population[np.argmax(final_fitness_scores)]
+
     print(f"Final generation best fitness = {last_gen_best_fitness:.3f}, "
           f"Best lengths = {last_gen_best_robot.lengths}")
 
@@ -193,6 +238,10 @@ def genetic_algorithm(pop_size, num_generations, mutation_rate, num_links,
         print(f"Global best lengths = {global_best_robot.lengths}")
     else:
         print("Global best robot was None — что-то пошло не так.")
+
+    # Сохраняем историю поколений в JSON
+    with open("ga_history.json", "w") as f:
+        json.dump(history, f, indent=2)
 
     # Возвращаем глобально лучшую особь за все поколения
     return global_best_robot if global_best_robot is not None else last_gen_best_robot

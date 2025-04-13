@@ -1,10 +1,10 @@
 import logging
+import json
 import gym
 from gym import spaces
 import numpy as np
 from manipulator import Manipulator7DOF
 from utilities import generate_random_target_in_half_sphere
-
 
 class ManipulatorEnv(gym.Env):
     """
@@ -16,6 +16,8 @@ class ManipulatorEnv(gym.Env):
     - movement penalty -> -0.003
     - energy penalty -> -0.008
     - randomize_start=False по умолчанию.
+
+    Добавлено логирование метрик (distance, reward, energy) в JSON-файл.
     """
 
     def __init__(
@@ -23,7 +25,9 @@ class ManipulatorEnv(gym.Env):
             link_lengths=None,
             target_position=None,
             randomize_start=False,
-            radius=3.0
+            radius=3.0,
+            enable_logging=False,
+            log_path="rl_history.json"
     ):
         super(ManipulatorEnv, self).__init__()
 
@@ -34,7 +38,7 @@ class ManipulatorEnv(gym.Env):
         self.target = target_position
         # По умолчанию отключаем случайный старт
         self.randomize_start = randomize_start
-        # Новый параметр: радиус полусферы
+        # Радиус полусферы
         self.radius = radius
 
         # Действие: ±0.05 рад на каждый сустав
@@ -56,8 +60,14 @@ class ManipulatorEnv(gym.Env):
         self.episode_reward = 0.0
         self.episode_step = 0
 
+        # Новое: логирование
+        self.enable_logging = enable_logging
+        self.log_path = log_path
+        if self.enable_logging:
+            # список, куда будем складывать данные об эпизодах
+            self.training_history = []
+
     def max_reach(self):
-        # Можно оставить, если нужно где-то
         return np.sum(self.link_lengths)
 
     def reset(self, seed=None, options=None):
@@ -112,6 +122,22 @@ class ManipulatorEnv(gym.Env):
                 f"EpReward={self.episode_reward:.3f}, Distance={distance:.3f}"
             )
 
+            # Если логирование включено, сохраним статистику за эпизод
+            if self.enable_logging:
+                avg_energy = float(np.mean(self.energy_log)) if len(self.energy_log) > 0 else 0.0
+                episode_data = {
+                    'episode': self.episode_count,
+                    'steps': self.episode_step,
+                    'final_distance': float(distance),
+                    'episode_reward': float(self.episode_reward),
+                    'avg_energy': avg_energy
+                }
+                self.training_history.append(episode_data)
+
+                # Сразу перезапишем весь файл (или можно откладывать до конца)
+                with open(self.log_path, 'w') as f:
+                    json.dump(self.training_history, f, indent=2)
+
         return self.get_observation(), reward, terminated, truncated, {"target": self.target}
 
     def get_observation(self):
@@ -139,7 +165,6 @@ class ManipulatorEnv(gym.Env):
         normalized_energy = energy / 10.0
         trajectory_penalty = np.sum(joint_deltas)
 
-        # Сделаем -3.0 для distance, -0.008 energy, -0.003 movement, +800 за успех
         reward = (
                 -3.0 * normalized_distance
                 + 0.3 * stability
@@ -147,7 +172,6 @@ class ManipulatorEnv(gym.Env):
                 - 0.003 * trajectory_penalty
         )
 
-        # Усиленный бонус
         if distance < 0.05:
             reward += 800.0
 
