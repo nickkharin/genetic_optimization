@@ -10,14 +10,19 @@ class ManipulatorEnv(gym.Env):
     """
     Среда для обучения манипулятора с использованием RL.
 
-    - Параметр radius=3.0 по умолчанию, вместо использования self.max_reach().
+    - Параметр radius=3.0 по умолчанию.
     - distance -> -3.0 * normalized_distance
     - bonus -> +800
     - movement penalty -> -0.003
     - energy penalty -> -0.008
     - randomize_start=False по умолчанию.
 
-    Добавлено логирование метрик (distance, reward, energy) в JSON-файл.
+    Добавлено:
+    1) Логирование метрик (distance, reward, energy) в JSON-файл,
+       если enable_logging=True.
+    2) max_episode_steps (по умолчанию 1000),
+       чтобы гарантированно завершать эпизод, даже если
+       робот не достиг цели (distance < 0.05).
     """
 
     def __init__(
@@ -27,7 +32,8 @@ class ManipulatorEnv(gym.Env):
             randomize_start=False,
             radius=3.0,
             enable_logging=False,
-            log_path="rl_history.json"
+            log_path="rl_history.json",
+            max_episode_steps=1000
     ):
         super(ManipulatorEnv, self).__init__()
 
@@ -55,12 +61,15 @@ class ManipulatorEnv(gym.Env):
         self.energy_log = []
         self.joint_angle_log = []
 
-        # Для эпизодической статистики
+        # Эпизодическая статистика
         self.episode_count = 0
         self.episode_reward = 0.0
         self.episode_step = 0
 
-        # Новое: логирование
+        # Лимит шагов в эпизоде
+        self.max_episode_steps = max_episode_steps
+
+        # Логирование в JSON
         self.enable_logging = enable_logging
         self.log_path = log_path
         if self.enable_logging:
@@ -98,31 +107,41 @@ class ManipulatorEnv(gym.Env):
     def step(self, action):
         self.episode_step += 1
 
+        # Применяем экшн
         current_angles = np.array(self.robot.get_joint_angles(), dtype=np.float32)
         new_angles = current_angles + action
         self.robot.set_joint_angles(new_angles)
 
+        # Считаем награду
         reward = self.calculate_reward(action)
         self.episode_reward += reward
 
+        # Проверяем дистанцию
         terminated = self.is_done()
-        truncated = False
 
+        # Учитываем лимит шагов (truncated)
+        truncated = False
+        if self.episode_step >= self.max_episode_steps:
+            truncated = True
+
+        # Логируем текущее положение
         self.trajectory.append(self.robot.forward_kinematics()[-1])
         self.energy_log.append(self.robot.energy_consumption())
         self.joint_angle_log.append(self.robot.get_joint_angles().copy())
 
-        if terminated:
+        # Если эпизод закончился (либо done, либо truncated),
+        # записываем статистику
+        if terminated or truncated:
             distance = np.linalg.norm(
                 self.robot.forward_kinematics()[-1] - self.target
             )
             logging.info(
                 f"Episode {self.episode_count} finished. "
                 f"Steps={self.episode_step}, "
-                f"EpReward={self.episode_reward:.3f}, Distance={distance:.3f}"
+                f"EpReward={self.episode_reward:.3f}, Distance={distance:.3f}, "
+                f"Terminated={terminated}, Truncated={truncated}"
             )
 
-            # Если логирование включено, сохраним статистику за эпизод
             if self.enable_logging:
                 avg_energy = float(np.mean(self.energy_log)) if len(self.energy_log) > 0 else 0.0
                 episode_data = {
@@ -130,15 +149,17 @@ class ManipulatorEnv(gym.Env):
                     'steps': self.episode_step,
                     'final_distance': float(distance),
                     'episode_reward': float(self.episode_reward),
-                    'avg_energy': avg_energy
+                    'avg_energy': avg_energy,
+                    'terminated': terminated,
+                    'truncated': truncated
                 }
                 self.training_history.append(episode_data)
 
-                # Сразу перезапишем весь файл (или можно откладывать до конца)
+                # Записываем всё
                 with open(self.log_path, 'w') as f:
                     json.dump(self.training_history, f, indent=2)
 
-        return self.get_observation(), reward, terminated, truncated, {"target": self.target}
+        return self.get_observation(), reward, (terminated or truncated), truncated, {"target": self.target}
 
     def get_observation(self):
         distance = np.linalg.norm(
@@ -152,26 +173,26 @@ class ManipulatorEnv(gym.Env):
         ])
 
     def calculate_reward(self, action):
-        # Усиленная логика награды
         current_ee_pos = self.robot.forward_kinematics()[-1]
         distance = np.linalg.norm(current_ee_pos - self.target)
         stability = self.robot.evaluate_stability()
         energy = self.robot.energy_consumption()
         joint_deltas = np.abs(action)
 
-        # Не используем self.max_reach() в distance
+        # Нормализуем расстояние для штрафа
         normalized_distance = distance / (self.radius + 1e-8)
-
         normalized_energy = energy / 10.0
         trajectory_penalty = np.sum(joint_deltas)
 
+        # Базовый штраф за дистанцию
         reward = (
-                -3.0 * normalized_distance
-                + 0.3 * stability
-                - 0.008 * normalized_energy
-                - 0.003 * trajectory_penalty
+            -3.0 * normalized_distance
+            + 0.3 * stability
+            - 0.008 * normalized_energy
+            - 0.003 * trajectory_penalty
         )
 
+        # Большой бонус за попадание
         if distance < 0.05:
             reward += 800.0
 
