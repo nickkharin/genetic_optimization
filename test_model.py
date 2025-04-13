@@ -50,6 +50,7 @@ if __name__ == '__main__':
     trajectory = []
     distances = []
     rewards = []
+    energy_log = []  # чтобы записывать энергию покадрово
 
     # Дополнительно: лог для каждого шага
     test_steps_log = []
@@ -80,22 +81,31 @@ if __name__ == '__main__':
     start_distance = np.linalg.norm(start_position - env.target)
     distances.append(start_distance)
     rewards.append(0.0)
+    energy_log.append(env.robot.energy_consumption())
 
     # Также сохраним начальное состояние
     test_steps_log.append({
         'step': 0,
         'distance': float(start_distance),
-        'reward': 0.0
+        'reward': 0.0,
+        'energy': float(energy_log[-1])
     })
 
     done = False
     total_reward = 0
     step = 0
-    max_steps = 3000
+    max_steps = 1500  # более короткий лимит, например
+
+    # Логика для «нет улучшений»
+    no_improvement_count = 0
+    best_distance_so_far = start_distance
 
     while not done and step < max_steps:
-        # Детерминированный режим (лучшая политика)
-        action, _ = model.predict(obs, deterministic=True)
+        # Если хотим случайный элемент (вдруг он выйдет из цикла):
+        action, _ = model.predict(obs, deterministic=False)
+        # Если хотим точно следовать политике:
+        # action, _ = model.predict(obs, deterministic=True)
+
         obs, reward, done, truncated, info = env.step(action)
 
         total_reward += reward
@@ -103,28 +113,53 @@ if __name__ == '__main__':
 
         current_position = env.robot.forward_kinematics()[-1]
         dist = np.linalg.norm(current_position - env.target)
+        current_energy = env.robot.energy_consumption()
 
         logging.info(f"Step {step}: Reward={reward:.3f}, Distance={dist:.3f}")
 
         trajectory.append(current_position)
         distances.append(dist)
         rewards.append(reward)
+        energy_log.append(current_energy)
 
         # Лог для JSON
         test_steps_log.append({
             'step': step,
             'distance': float(dist),
-            'reward': float(reward)
+            'reward': float(reward),
+            'energy': float(current_energy)
         })
 
-    if done:
+        # Проверяем улучшение
+        if dist < best_distance_so_far - 0.001:
+            best_distance_so_far = dist
+            no_improvement_count = 0
+        else:
+            no_improvement_count += 1
+
+        # Если слишком долго нет улучшения, выходим
+        if no_improvement_count > 300:
+            logging.info(f"Нет улучшений {no_improvement_count} шагов подряд, прерываем...")
+            break
+
+        if done:
+            logging.info(f"Манипулятор достиг цели на шаге {step}.")
+            break
+
+    # Финальный лог о результате
+    if done and step < max_steps:
         logging.info(f"Тест завершён: манипулятор достиг цели. Итоговая награда: {total_reward:.3f}, Шаги: {step}")
     else:
-        logging.info(f"Тест завершён: лимит шагов. Итоговая награда: {total_reward:.3f}, Шаги: {step}")
+        logging.info(f"Тест завершён: лимит шагов или отсутствие улучшений. Итоговая награда: {total_reward:.3f}, Шаги: {step}")
 
     # Сохраняем логи шага в JSON (test_log.json)
     with open("test_log.json", "w", encoding='utf-8') as f:
         json.dump(test_steps_log, f, indent=2)
+
+    # Рассчитаем «среднюю энергию» и «среднюю дистанцию» за весь тест (если хотим)
+    avg_energy = float(np.mean(energy_log))
+    avg_dist = float(np.mean(distances))
+    logging.info(f"Final test stats: avg_energy={avg_energy:.3f}, avg_distance={avg_dist:.3f}")
 
     # Визуализация
     trajectory = np.array(trajectory)
@@ -163,6 +198,19 @@ if __name__ == '__main__':
     )
 
     # Отрисовка манипулятора (последняя конфигурация)
+    def plot_manipulator(ax, robot, base_position=[0, 0, 0]):
+        all_positions = robot.forward_kinematics()
+        x_coords = [base_position[0]]
+        y_coords = [base_position[1]]
+        z_coords = [base_position[2]]
+        for pos in all_positions:
+            x_coords.append(pos[0])
+            y_coords.append(pos[1])
+            z_coords.append(pos[2])
+        ax.plot(x_coords, y_coords, z_coords, '-o', color='gray', label='Manipulator')
+        ax.scatter(x_coords, y_coords, z_coords, color='black')
+        return ax
+
     plot_manipulator(ax, env.robot, [0, 0, 0])
 
     ax.set_xlabel('X-axis')
