@@ -122,7 +122,7 @@ def main():
         gae_lambda=0.95,
         clip_range=0.2
     )
-    model.learn(total_timesteps=400000)
+    model.learn(total_timesteps=500000)
     model.save("ppo_manipulator")
     logging.info("RL model ppo_manipulator saved.")
 
